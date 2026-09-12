@@ -129,7 +129,7 @@ class DictationController:
     def _dismiss_after(self, session, delay):
         time.sleep(delay)
         if self._is_current(session):
-            self.overlay.hide()
+            self.overlay.ready()
 
     def _transcribe_and_insert(self, session, capture, target_window):
         path = None

@@ -1,6 +1,6 @@
 # Flow Linux
 
-Flow Linux is a small background dictation app for Kali/Debian XFCE on X11. Hold a shortcut, speak, release, and Flow sends the recording to Groq before pasting the transcript into the window that was active when recording began.
+Flow Linux is a small background dictation app for Kali/Debian XFCE on X11. Hold a shortcut, speak, release, and Flow sends the recording to Groq before pasting the transcript into the window that was active when recording began. A persistent, non-focusable status pill stays above windows on the focused app's monitor and shows Ready, Listening, Transcribing, and Done states.
 
 ## Requirements
 

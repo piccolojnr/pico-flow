@@ -8,13 +8,13 @@ from flow.controller import DictationController
 class Overlay:
     def __init__(self):
         self.messages = []
-        self.hidden = 0
+        self.ready_count = 0
 
     def show(self, message):
         self.messages.append(message)
 
-    def hide(self):
-        self.hidden += 1
+    def ready(self):
+        self.ready_count += 1
 
 
 class Recorder:
@@ -104,6 +104,7 @@ def test_transcript_is_inserted_without_logging_or_duplicate_submission(monkeypa
     assert inserted == [("hello", {"target_window": "window-1", "restore_delay": 0.6})]
     assert overlay.messages[-1] == "✓   Done"
     item._pool.shutdown(wait=True)
+    assert overlay.ready_count == 1
 
 
 def test_handsfree_toggles_recording_and_ptt_release_does_not_stop_it(monkeypatch):

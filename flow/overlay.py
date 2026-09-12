@@ -49,11 +49,9 @@ class _XEvent(ctypes.Union):
 def _set_x11_no_input_hint(window):
     """Keep GTK's top-level overlay from taking focus when it is presented."""
     try:
-        gi.require_version("GdkX11", "4.0")
-        from gi.repository import GdkX11
-
-        surface = window.get_surface()
-        xid = GdkX11.X11Surface.get_xid(surface)
+        xid = _x11_window_id(window)
+        if not xid:
+            return
         x11 = ctypes.CDLL("libX11.so.6")
         x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
         x11.XOpenDisplay.restype = ctypes.c_void_p
@@ -75,6 +73,17 @@ def _set_x11_no_input_hint(window):
         # GdkX11/libX11 are part of the target X11 environment; retain GTK's
         # non-focusable widget setting as a fallback on unusual builds.
         pass
+
+
+def _x11_window_id(window):
+    try:
+        gi.require_version("GdkX11", "4.0")
+        from gi.repository import GdkX11
+
+        surface = window.get_surface()
+        return int(GdkX11.X11Surface.get_xid(surface)) if surface else None
+    except Exception:
+        return None
 
 
 def _set_x11_window_states(window_id, states):
@@ -129,6 +138,7 @@ class Overlay:
         self.available = GTK_AVAILABLE
         self.app = None
         self.window = None
+        self.window_id = None
         self.label = None
         self._return_focus_window = None
 
@@ -136,6 +146,7 @@ class Overlay:
         if not self.available:
             return
         self.app = app
+        self._return_focus_window = self._active_window_id()
         self._activate(app)
 
     def _activate(self, app):
@@ -153,7 +164,7 @@ class Overlay:
         box.set_margin_bottom(13)
         box.set_margin_start(19)
         box.set_margin_end(19)
-        self.label = Gtk.Label(label="●  Listening")
+        self.label = Gtk.Label(label="●  Ready")
         self.label.add_css_class("flow-label")
         box.append(self.label)
         self.window.set_child(box)
@@ -168,7 +179,30 @@ class Overlay:
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
         self.window.realize()
-        self.window.hide()
+        self.window_id = _x11_window_id(self.window)
+        # Set the no-input hint before mapping so creating the persistent pill
+        # cannot steal focus from the window the user is working in.
+        _set_x11_no_input_hint(self.window)
+        self.window.set_visible(True)
+        GLib.timeout_add(80, self._finish_initial_map)
+
+    def _finish_initial_map(self):
+        # GTK may rewrite WM_HINTS when the surface is mapped. Reapply the
+        # no-input hint, restore the pre-overlay focus once, then raise the
+        # pill above that window without activating it.
+        _set_x11_no_input_hint(self.window)
+        target = self._return_focus_window
+        if target and target != str(self.window_id):
+            try:
+                subprocess.run(
+                    ["xdotool", "windowactivate", "--sync", target],
+                    check=True, timeout=1.0,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except (FileNotFoundError, subprocess.SubprocessError):
+                pass
+        self._place_bottom_center()
+        return GLib.SOURCE_REMOVE
 
     def show(self, text):
         if not self.available or self.window is None:
@@ -178,17 +212,11 @@ class Overlay:
 
     def _show(self, text):
         self.label.set_text(text)
-        if not self.window.get_visible():
-            self._return_focus_window = self._active_window_id()
-        # Mapping a top-level with set_visible avoids Gtk.Window.present()'s
-        # activation request, which can steal focus even when it is not
-        # focusable. Apply WM_HINTS after mapping in case GTK rewrites them.
+        self._return_focus_window = self._active_window_id()
+        # This window stays mapped, so changing its label does not need to
+        # reactivate the focused app. Reassert its position over that app.
         self.window.set_visible(True)
         _set_x11_no_input_hint(self.window)
-        self._restore_original_focus()
-        # XFCE can apply its focus-stealing policy asynchronously after the
-        # map event, so assert focus again after the WM has processed it.
-        GLib.timeout_add(220, self._restore_original_focus)
         GLib.timeout_add(120, self._place_bottom_center)
         return False
 
@@ -203,33 +231,17 @@ class Overlay:
         except (FileNotFoundError, subprocess.SubprocessError):
             return None
 
-    def _restore_original_focus(self):
-        target = self._return_focus_window
-        if not target:
-            return GLib.SOURCE_REMOVE
-        try:
-            subprocess.run(
-                ["xdotool", "windowactivate", "--sync", target],
-                check=True, timeout=1.0,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except (FileNotFoundError, subprocess.SubprocessError):
-            pass
-        return GLib.SOURCE_REMOVE
-
     def _place_bottom_center(self):
         try:
-            result = subprocess.run(
-                ["xdotool", "search", "--onlyvisible", "--name", "^Flow Linux$"],
-                check=True, capture_output=True, text=True, timeout=1.0,
-            )
-            window_id = result.stdout.strip().splitlines()[-1]
-            monitor = self._active_monitor()
+            window_id = self.window_id
+            if not window_id:
+                return GLib.SOURCE_REMOVE
+            monitor = self._active_monitor(self._return_focus_window)
             if monitor:
                 x, y, width, height = monitor
                 _set_x11_window_states(window_id, [
                     "_NET_WM_STATE_ABOVE", "_NET_WM_STATE_SKIP_TASKBAR",
-                    "_NET_WM_STATE_SKIP_PAGER",
+                    "_NET_WM_STATE_SKIP_PAGER", "_NET_WM_STATE_STICKY",
                 ])
                 subprocess.run(
                     ["xdotool", "windowraise", window_id], check=False, timeout=1.0
@@ -243,18 +255,12 @@ class Overlay:
         return GLib.SOURCE_REMOVE
 
     @staticmethod
-    def _active_monitor():
+    def _active_monitor(window_id=None):
         try:
             monitors = subprocess.run(
                 ["xrandr", "--listactivemonitors"], check=True, capture_output=True,
                 text=True, timeout=1.0,
             ).stdout.splitlines()[1:]
-            pointer = subprocess.run(
-                ["xdotool", "getmouselocation", "--shell"], check=True,
-                capture_output=True, text=True, timeout=1.0,
-            ).stdout
-            values = dict(line.split("=", 1) for line in pointer.splitlines() if "=" in line)
-            px, py = int(values["X"]), int(values["Y"])
             parsed = []
             for line in monitors:
                 match = re.search(r"(\d+)/\d+x(\d+)/\d+([+-]\d+)([+-]\d+)", line)
@@ -262,17 +268,42 @@ class Overlay:
                     width, height, x, y = map(int, match.groups())
                     item = (x, y, width, height)
                     parsed.append(("*" in line, item))
-                    if x <= px < x + width and y <= py < y + height:
-                        return item
+
+            if window_id:
+                geometry = subprocess.run(
+                    ["xdotool", "getwindowgeometry", "--shell", window_id],
+                    check=True, capture_output=True, text=True, timeout=1.0,
+                ).stdout
+                values = dict(
+                    line.split("=", 1) for line in geometry.splitlines() if "=" in line
+                )
+                center_x = int(values["X"]) + int(values["WIDTH"]) // 2
+                center_y = int(values["Y"]) + int(values["HEIGHT"]) // 2
+                for _primary, (x, y, width, height) in parsed:
+                    if x <= center_x < x + width and y <= center_y < y + height:
+                        return (x, y, width, height)
+
+            # On startup, before any app window has been activated, place the
+            # pill on the monitor containing the pointer.
+            pointer = subprocess.run(
+                ["xdotool", "getmouselocation", "--shell"], check=True,
+                capture_output=True, text=True, timeout=1.0,
+            ).stdout
+            values = dict(line.split("=", 1) for line in pointer.splitlines() if "=" in line)
+            px, py = int(values["X"]), int(values["Y"])
+            for _primary, (x, y, width, height) in parsed:
+                if x <= px < x + width and y <= py < y + height:
+                    return (x, y, width, height)
             return next((item for primary, item in parsed if primary), parsed[0][1] if parsed else None)
         except (FileNotFoundError, subprocess.SubprocessError, KeyError, ValueError, IndexError):
             return None
 
-    def hide(self):
+    def ready(self):
         if self.available and self.window is not None:
-            GLib.idle_add(self._hide)
+            GLib.idle_add(self._show_ready)
 
-    def _hide(self):
-        self.window.hide()
-        self._return_focus_window = None
+    def _show_ready(self):
+        self.label.set_text("●  Ready")
+        self.window.set_visible(True)
+        GLib.timeout_add(120, self._place_bottom_center)
         return GLib.SOURCE_REMOVE
