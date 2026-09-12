@@ -36,17 +36,23 @@ Open **Flow Linux** from the desktop applications menu, choose **Settings** from
 ~/.local/bin/flow-linux --settings
 ```
 
-Enter the Groq API key in Settings. The key is stored in `config.toml`, which is mode `0600` and ignored by Git. Settings also let you select the microphone, language, model, hands-free mode, and login autostart.
+Enter the Groq API key in Settings. The key is stored in `config.toml`, which is mode `0600` and ignored by Git. Settings also let you select the microphone, language, model, hands-free mode, login autostart, and whether to save transcription history.
 
 ## Use
 
 - **Push-to-talk:** focus a text field, hold **Ctrl+Super**, speak, then release either modifier. This keeps the existing push-to-talk behavior.
 - **Hands-free:** when enabled in Settings, press **Ctrl+Super+Space** once to start continuous recording, then press the same chord again to stop and transcribe.
-- Right-click the tray icon for **Settings** or **Quit Flow Linux**. Clicking the icon opens Settings.
+- Right-click the tray icon for **History**, **Settings**, or **Quit Flow Linux**. Clicking the icon opens Settings.
 
 The app starts hidden in the background at login. Turn off **Start Flow automatically when I log in** in Settings to remove the autostart entry. The applications-menu launcher always opens Settings.
 
-Flow does not keep audio or transcript history. Audio is temporary and deleted after each transcription attempt. Logs report timing and audio level but do not include dictated words, API keys, or audio data.
+## Local transcription history
+
+History is opt-in. Turn on **Save transcription history** in Settings to save successful transcripts locally. The database is `~/.local/share/flow-linux/history.db` (or `$XDG_DATA_HOME/flow-linux/history.db`), protected with private directory/file permissions. It stores transcript text, timestamp, recording duration, provider, model, and whether insertion succeeded; it never stores audio, syncs to a cloud service, or sends telemetry. The oldest entries are automatically removed above 500 records.
+
+Choose **History** from the tray menu to search recent dictations, copy a transcript, delete one entry, or clear all history. If paste fails after transcription, Flow keeps the transcript in History and sends a desktop notification with a link to it. Turn **Save transcription history** off in Settings to stop saving future transcripts; existing entries remain until deleted or cleared. With history off, dictation and paste work as usual, but failed insertion cannot be recovered from History.
+
+Audio is temporary and deleted after each transcription attempt. Logs report timing and audio level but do not include dictated words, API keys, or audio data.
 
 ## Configuration file
 
@@ -70,6 +76,7 @@ handsfree_enabled = true
 
 [app]
 autostart = true
+save_history = false
 clipboard_restore_delay = 0.6
 ```
 
@@ -92,6 +99,6 @@ The main application and floating status overlay use GTK 4. A small separate GTK
 
 ## Manual XFCE/X11 check
 
-After installing and entering a Groq key in Settings, open an editor and test both shortcuts. Confirm the overlay remains informational, the original editor keeps focus, text appears at the cursor, and a second dictation works immediately. Also test a short tap, silence, and a temporary network failure; each should show a brief status and leave the background app running. Check that the previous text clipboard contents are restored after a successful paste. These desktop and live-audio checks need a real XFCE/X11 session, microphone, and Groq credentials.
+After installing and entering a Groq key in Settings, open an editor and test both shortcuts. Confirm the listening pill appears only during recording, stays at the bottom of the active monitor without taking focus, and hides when capture ends. Confirm text appears at the cursor and a second dictation works immediately. Also test a short tap, silence, and a temporary network failure; each should leave the background app running. Check that the previous text clipboard contents are restored after a successful paste. These desktop and live-audio checks need a real XFCE/X11 session, microphone, and Groq credentials.
 
 Clipboard restoration covers text and is best-effort; other clipboard target types may not be preserved.

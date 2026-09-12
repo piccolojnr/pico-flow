@@ -1,6 +1,7 @@
 .venv/
 .env
 config.toml
+history.db*
 *.toml.tmp
 __pycache__/
 *.pyc

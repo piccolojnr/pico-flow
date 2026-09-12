@@ -10,7 +10,7 @@ def test_toml_round_trip_and_private_file_mode(tmp_path):
     store = ConfigStore(path=path, legacy_paths=[])
     config = Config(
         groq_api_key='secret "quoted" value', input_device="5", language="fr",
-        handsfree_enabled=False, autostart_enabled=False,
+        handsfree_enabled=False, autostart_enabled=False, save_history=True,
     )
     store.save(config)
 
@@ -35,6 +35,7 @@ def test_migrates_legacy_env_once_and_keeps_toml_authoritative(tmp_path):
     assert migrated.shortcut == "ctrl+alt"
     assert migrated.silence_threshold == 180
     assert migrated.handsfree_enabled is True
+    assert migrated.save_history is False
     assert store.path.exists()
 
     legacy.write_text("GROQ_API_KEY=changed-later\n", encoding="utf-8")

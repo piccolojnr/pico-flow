@@ -20,6 +20,7 @@ class Config:
     clipboard_restore_delay: float = 0.6
     handsfree_enabled: bool = True
     autostart_enabled: bool = True
+    save_history: bool = False
 
 
 def default_config_path() -> Path:
@@ -89,6 +90,7 @@ def _from_toml(data) -> Config:
         shortcut="+".join(keys),
         handsfree_enabled=_bool(shortcuts.get("handsfree_enabled", True), "handsfree_enabled"),
         autostart_enabled=_bool(app.get("autostart", True), "autostart"),
+        save_history=_bool(app.get("save_history", False), "save_history"),
         clipboard_restore_delay=_number(
             app.get("clipboard_restore_delay"), "clipboard_restore_delay", 0.6, float
         ),
@@ -121,6 +123,7 @@ def serialize_config(config: Config) -> str:
         "",
         "[app]",
         f"autostart = {str(config.autostart_enabled).lower()}",
+        f"save_history = {str(config.save_history).lower()}",
         f"clipboard_restore_delay = {config.clipboard_restore_delay:g}",
         "",
     ])
@@ -152,10 +155,13 @@ class ConfigStore:
             shortcut = (values.get("FLOW_SHORTCUT") or config.shortcut).strip().lower()
             handsfree = (values.get("FLOW_HANDSFREE_ENABLED") or "true").strip().lower()
             autostart = (values.get("FLOW_AUTOSTART_ENABLED") or "true").strip().lower()
+            save_history = (values.get("FLOW_SAVE_HISTORY") or "false").strip().lower()
             if handsfree not in {"true", "false", "1", "0", "yes", "no"}:
                 raise ValueError("FLOW_HANDSFREE_ENABLED must be true or false")
             if autostart not in {"true", "false", "1", "0", "yes", "no"}:
                 raise ValueError("FLOW_AUTOSTART_ENABLED must be true or false")
+            if save_history not in {"true", "false", "1", "0", "yes", "no"}:
+                raise ValueError("FLOW_SAVE_HISTORY must be true or false")
             # Reuse the normal validator for numeric options and the shortcut.
             config = _from_toml({
                 "transcription": {
@@ -175,6 +181,7 @@ class ConfigStore:
                 },
                 "app": {
                     "autostart": autostart in {"true", "1", "yes"},
+                    "save_history": save_history in {"true", "1", "yes"},
                     "clipboard_restore_delay": _number(
                         values.get("FLOW_CLIPBOARD_RESTORE_DELAY"),
                         "FLOW_CLIPBOARD_RESTORE_DELAY", 0.6, float,

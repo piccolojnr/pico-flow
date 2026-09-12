@@ -6,12 +6,15 @@ import time
 
 from . import audio, clipboard
 from .audio import Recorder
-from .clipboard import InsertionError
+from .history import HistoryStore
 from .providers import GroqProvider, TranscriptionError
 
 
 class DictationController:
-    def __init__(self, config, overlay, recorder=None, provider=None, inserter=None):
+    def __init__(
+        self, config, overlay, recorder=None, provider=None, inserter=None,
+        history_store=None, recovery_notifier=None,
+    ):
         self.config = config
         self.overlay = overlay
         self.recorder = recorder or Recorder(device=config.input_device or None)
@@ -19,6 +22,8 @@ class DictationController:
             config.groq_api_key, config.model, timeout=config.api_timeout
         )
         self.inserter = inserter or clipboard.insert_text
+        self.history_store = history_store if history_store is not None else HistoryStore()
+        self.recovery_notifier = recovery_notifier or (lambda _saved: None)
         self._lock = threading.RLock()
         self._recording = False
         self._recording_mode = None
@@ -136,21 +141,61 @@ class DictationController:
         if self._is_current(session):
             self.overlay.hide()
 
+    def _save_history(self, transcript, capture, model):
+        with self._lock:
+            config = self.config
+        if not config.save_history:
+            return None
+        try:
+            return self.history_store.add(
+                transcript, capture.duration, "Groq", model,
+            )
+        except Exception as exc:
+            print(f"[Flow] Could not save local History: {exc}")
+            return None
+
+    def _mark_history_insertion(self, entry_id, status):
+        if entry_id is None:
+            return
+        try:
+            self.history_store.mark_insertion(entry_id, status)
+        except Exception as exc:
+            print(f"[Flow] Could not update History insertion status: {exc}")
+
     def _transcribe_and_insert(self, session, capture, target_window):
         path = None
         try:
+            with self._lock:
+                provider = self.provider
+                language = self.config.language
+                model = self.config.model
             path = audio.write_wav(capture)
             print("[Flow] Transcribing")
             started = time.monotonic()
-            text = self.provider.transcribe(path, self.config.language)
+            text = provider.transcribe(path, language)
             print(f"[Flow] Transcript received in {time.monotonic() - started:.2f}s")
             if not text.strip():
                 self._error(session, "No speech detected", 1.0)
                 return
-            self.inserter(
-                text.strip(), target_window=target_window,
-                restore_delay=self.config.clipboard_restore_delay,
-            )
+            text = text.strip()
+            # Commit the text before attempting paste, so a paste failure can
+            # never discard a successfully transcribed dictation.
+            history_id = self._save_history(text, capture, model)
+            try:
+                self.inserter(
+                    text, target_window=target_window,
+                    restore_delay=self.config.clipboard_restore_delay,
+                )
+            except Exception as exc:
+                self._mark_history_insertion(history_id, "failed")
+                print(f"[Flow] Text insertion failed: {exc}")
+                try:
+                    self.recovery_notifier(history_id is not None)
+                except Exception as notify_error:
+                    print(f"[Flow] Could not show insertion recovery notice: {notify_error}")
+                self._error(session, "Text insertion failed", 1.4)
+                return
+            self._mark_history_insertion(history_id, "inserted")
             print("[Flow] Text inserted")
             self._status(session, "✓   Done")
             self._dismiss_after(session, 0.8)
@@ -160,9 +205,6 @@ class DictationController:
             if exc.kind == "api":
                 label = "Transcription failed"
             self._error(session, label, 1.4)
-        except InsertionError as exc:
-            print(f"[Flow] {exc}")
-            self._error(session, "Text insertion failed", 1.4)
         except Exception as exc:
             print(f"[Flow] Dictation failed: {exc}")
             self._error(session, "Transcription failed", 1.4)

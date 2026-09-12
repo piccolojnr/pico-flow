@@ -20,6 +20,9 @@ class Tray:
         self.icon.connect("activate", self._open_settings)
         self.icon.connect("popup-menu", self._popup)
         self.menu = Gtk.Menu()
+        history = Gtk.MenuItem(label="History")
+        history.connect("activate", self._open_history)
+        self.menu.append(history)
         settings = Gtk.MenuItem(label="Settings")
         settings.connect("activate", self._open_settings)
         self.menu.append(settings)
@@ -42,6 +45,9 @@ class Tray:
 
     def _open_settings(self, *_args):
         self._activate_action("settings")
+
+    def _open_history(self, *_args):
+        self._activate_action("history")
 
     def _quit(self, *_args):
         self._activate_action("quit")

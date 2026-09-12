@@ -1,8 +1,10 @@
 import numpy as np
 
 from flow.audio import Capture
+from flow.clipboard import InsertionError
 from flow.config import Config
 from flow.controller import DictationController
+from flow.history import HistoryStore
 
 
 class Overlay:
@@ -45,13 +47,20 @@ def capture(duration=1.0, rms=700):
     return Capture(np.ones((16000, 1), dtype=np.int16), duration, rms)
 
 
-def controller(recorder, provider, inserted, monkeypatch):
+def controller(
+    recorder, provider, inserted, monkeypatch, *, save_history=False,
+    history_store=None, recovery_notifier=None, inserter=None,
+):
     overlay = Overlay()
-    config = Config(groq_api_key="test", minimum_duration=0.35, silence_threshold=220)
+    config = Config(
+        groq_api_key="test", minimum_duration=0.35,
+        silence_threshold=220, save_history=save_history,
+    )
     monkeypatch.setattr("flow.controller.clipboard.active_window", lambda: "window-1")
     item = DictationController(
         config, overlay, recorder=recorder, provider=provider,
-        inserter=lambda text, **kwargs: inserted.append((text, kwargs)),
+        inserter=inserter or (lambda text, **kwargs: inserted.append((text, kwargs))),
+        history_store=history_store, recovery_notifier=recovery_notifier,
     )
     item._session = 1
     return item, overlay
@@ -107,6 +116,85 @@ def test_transcript_is_inserted_without_logging_or_duplicate_submission(monkeypa
     item._pool.shutdown(wait=True)
     assert overlay.messages == []
     assert overlay.hidden == 1
+
+
+def test_history_disabled_does_not_persist_but_dictation_still_inserts(monkeypatch, tmp_path):
+    history = HistoryStore(path=tmp_path / "history.db")
+    inserted = []
+    item, _overlay = controller(
+        Recorder(capture()), Provider("still works"), inserted, monkeypatch,
+        save_history=False, history_store=history,
+    )
+
+    item._transcribe_and_insert(1, capture(), "window-1")
+    item._pool.shutdown(wait=True)
+
+    assert inserted[0][0] == "still works"
+    assert not history.path.exists()
+
+
+def test_successful_dictation_updates_saved_history_status(monkeypatch):
+    class MemoryHistoryStore:
+        def __init__(self):
+            self.added = []
+            self.statuses = []
+
+        def add(self, *args):
+            self.added.append(args)
+            return 17
+
+        def mark_insertion(self, entry_id, status):
+            self.statuses.append((entry_id, status))
+
+    history = MemoryHistoryStore()
+    item, _overlay = controller(
+        Recorder(capture()), Provider("saved text"), [], monkeypatch,
+        save_history=True, history_store=history,
+    )
+
+    item._transcribe_and_insert(1, capture(duration=1.25), "window-1")
+    item._pool.shutdown(wait=True)
+
+    assert history.added == [("saved text", 1.25, "Groq", "whisper-large-v3-turbo")]
+    assert history.statuses == [(17, "inserted")]
+
+
+def test_insertion_failure_keeps_transcript_and_notifies_history_recovery(monkeypatch, tmp_path):
+    history = HistoryStore(tmp_path / "history.db")
+    notifications = []
+
+    def fail_insertion(*_args, **_kwargs):
+        raise InsertionError("clipboard unavailable")
+
+    item, _overlay = controller(
+        Recorder(capture()), Provider("recover this sentence"), [], monkeypatch,
+        save_history=True, history_store=history, recovery_notifier=notifications.append,
+        inserter=fail_insertion,
+    )
+
+    item._transcribe_and_insert(1, capture(), "window-1")
+    item._pool.shutdown(wait=True)
+
+    entries = history.list_entries()
+    assert entries[0].transcript == "recover this sentence"
+    assert entries[0].insertion_status == "failed"
+    assert notifications == [True]
+
+
+def test_history_database_failure_does_not_interrupt_successful_paste(monkeypatch):
+    class BrokenHistoryStore:
+        def add(self, *_args):
+            raise OSError("read-only data directory")
+
+    inserted = []
+    item, _overlay = controller(
+        Recorder(capture()), Provider("still pasted"), inserted, monkeypatch,
+        save_history=True, history_store=BrokenHistoryStore(),
+    )
+    item._transcribe_and_insert(1, capture(), "window-1")
+    item._pool.shutdown(wait=True)
+
+    assert inserted[0][0] == "still pasted"
 
 
 def test_handsfree_toggles_recording_and_ptt_release_does_not_stop_it(monkeypatch):

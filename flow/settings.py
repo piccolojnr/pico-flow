@@ -14,7 +14,7 @@ class SettingsWindow:
         self.on_save = on_save
         self.window = Gtk.ApplicationWindow(application=application)
         self.window.set_title("Flow Linux Settings")
-        self.window.set_default_size(480, 430)
+        self.window.set_default_size(480, 530)
         self.window.set_resizable(False)
         self.window.connect("close-request", self._close_request)
 
@@ -57,6 +57,16 @@ class SettingsWindow:
         self.autostart = Gtk.CheckButton(label="Start Flow automatically when I log in")
         self.autostart.set_active(config.autostart_enabled)
         outer.append(self.autostart)
+        self.save_history = Gtk.CheckButton(label="Save transcription history")
+        self.save_history.set_active(config.save_history)
+        outer.append(self.save_history)
+        history_note = Gtk.Label(
+            label="Saved only on this device, up to 500 transcripts. Audio is never saved."
+        )
+        history_note.set_xalign(0)
+        history_note.set_wrap(True)
+        history_note.add_css_class("dim-label")
+        outer.append(history_note)
 
         shortcut_note = Gtk.Label(
             label="Hold Ctrl+Super to dictate. Press Ctrl+Super+Space to start, "
@@ -112,6 +122,7 @@ class SettingsWindow:
                 clipboard_restore_delay=self.config.clipboard_restore_delay,
                 handsfree_enabled=self.handsfree.get_active(),
                 autostart_enabled=self.autostart.get_active(),
+                save_history=self.save_history.get_active(),
             )
             if not config.language:
                 raise ValueError("Language cannot be empty")
@@ -129,6 +140,7 @@ class SettingsWindow:
         self.device.set_text(self.config.input_device)
         self.handsfree.set_active(self.config.handsfree_enabled)
         self.autostart.set_active(self.config.autostart_enabled)
+        self.save_history.set_active(self.config.save_history)
         self.window.present()
 
     def _close_request(self, window):

@@ -15,6 +15,8 @@ from gi.repository import Gio, GLib, Gtk
 from flow.config import Config, ConfigStore
 from flow.controller import DictationController
 from flow.desktop import set_autostart
+from flow.history import HistoryStore
+from flow.history_window import HistoryWindow
 from flow.hotkeys import PynputHotkeyListener
 from flow.overlay import Overlay
 from flow.settings import SettingsWindow
@@ -36,7 +38,13 @@ class FlowApplication:
             self.config = Config()
             self.config_error = str(exc)
         self.overlay = Overlay()
-        self.controller = DictationController(self.config, self.overlay)
+        self.history_store = HistoryStore()
+        self.controller = DictationController(
+            self.config,
+            self.overlay,
+            history_store=self.history_store,
+            recovery_notifier=self._notify_insertion_recovery,
+        )
         self.listener = PynputHotkeyListener(
             self.config.shortcut,
             self.controller.start,
@@ -46,9 +54,11 @@ class FlowApplication:
             self.controller.is_handsfree_active,
         )
         self.settings_window = None
+        self.history_window = None
         self.tray_process = None
 
         self._add_action("settings", self.open_settings)
+        self._add_action("history", self.open_history)
         self._add_action("quit", self.quit)
         self.application.connect("startup", self._startup)
         self.application.connect("activate", self._activate)
@@ -107,6 +117,35 @@ class FlowApplication:
         if self.config_error:
             self.settings_window.error.set_text(self.config_error)
         self.settings_window.present()
+
+    def open_history(self):
+        if self.history_window is None:
+            self.history_window = HistoryWindow(
+                self.application,
+                self.history_store,
+                history_enabled=lambda: self.config.save_history,
+            )
+        self.history_window.present()
+
+    def _notify_insertion_recovery(self, transcript_saved):
+        GLib.idle_add(self._send_insertion_recovery_notification, transcript_saved)
+
+    def _send_insertion_recovery_notification(self, transcript_saved):
+        try:
+            notification = Gio.Notification.new("Flow Linux")
+            if transcript_saved:
+                notification.set_body(
+                    "Text could not be inserted. The transcript is saved in local History."
+                )
+                notification.set_default_action("app.history")
+            else:
+                notification.set_body(
+                    "Text could not be inserted and was not saved. Check Settings or dictate again."
+                )
+            self.application.send_notification("insertion-recovery", notification)
+        except Exception as exc:
+            print(f"[Flow] Could not show insertion recovery notification: {exc}")
+        return GLib.SOURCE_REMOVE
 
     def _save_settings(self, config):
         was_handsfree = self.controller.is_handsfree_active()
