@@ -146,7 +146,6 @@ class Overlay:
         if not self.available:
             return
         self.app = app
-        self._return_focus_window = self._active_window_id()
         self._activate(app)
 
     def _activate(self, app):
@@ -164,7 +163,7 @@ class Overlay:
         box.set_margin_bottom(13)
         box.set_margin_start(19)
         box.set_margin_end(19)
-        self.label = Gtk.Label(label="●  Ready")
+        self.label = Gtk.Label(label="●  Listening")
         self.label.add_css_class("flow-label")
         box.append(self.label)
         self.window.set_child(box)
@@ -180,16 +179,13 @@ class Overlay:
         )
         self.window.realize()
         self.window_id = _x11_window_id(self.window)
-        # Set the no-input hint before mapping so creating the persistent pill
-        # cannot steal focus from the window the user is working in.
         _set_x11_no_input_hint(self.window)
-        self.window.set_visible(True)
-        GLib.timeout_add(80, self._finish_initial_map)
+        self.window.hide()
 
     def _finish_initial_map(self):
         # GTK may rewrite WM_HINTS when the surface is mapped. Reapply the
-        # no-input hint, restore the pre-overlay focus once, then raise the
-        # pill above that window without activating it.
+        # no-input hint and restore the focused app once, then place the pill
+        # after XFCE finishes its initial window placement.
         _set_x11_no_input_hint(self.window)
         target = self._return_focus_window
         if target and target != str(self.window_id):
@@ -201,7 +197,7 @@ class Overlay:
                 )
             except (FileNotFoundError, subprocess.SubprocessError):
                 pass
-        self._place_bottom_center()
+        GLib.timeout_add(300, self._place_bottom_center)
         return GLib.SOURCE_REMOVE
 
     def show(self, text):
@@ -213,11 +209,13 @@ class Overlay:
     def _show(self, text):
         self.label.set_text(text)
         self._return_focus_window = self._active_window_id()
-        # This window stays mapped, so changing its label does not need to
-        # reactivate the focused app. Reassert its position over that app.
+        was_visible = self.window.get_visible()
         self.window.set_visible(True)
         _set_x11_no_input_hint(self.window)
-        GLib.timeout_add(120, self._place_bottom_center)
+        if was_visible:
+            GLib.timeout_add(180, self._place_bottom_center)
+        else:
+            GLib.timeout_add(120, self._finish_initial_map)
         return False
 
     @staticmethod
@@ -244,10 +242,10 @@ class Overlay:
                     "_NET_WM_STATE_SKIP_PAGER", "_NET_WM_STATE_STICKY",
                 ])
                 subprocess.run(
-                    ["xdotool", "windowraise", window_id], check=False, timeout=1.0
+                    ["xdotool", "windowraise", str(window_id)], check=False, timeout=1.0
                 )
                 subprocess.run(
-                    ["xdotool", "windowmove", window_id, str(x + (width - 300) // 2), str(y + height - 95)],
+                    ["xdotool", "windowmove", str(window_id), str(x + (width - 300) // 2), str(y + height - 95)],
                     check=False, timeout=1.0,
                 )
         except (FileNotFoundError, subprocess.SubprocessError, IndexError):
@@ -298,12 +296,11 @@ class Overlay:
         except (FileNotFoundError, subprocess.SubprocessError, KeyError, ValueError, IndexError):
             return None
 
-    def ready(self):
+    def hide(self):
         if self.available and self.window is not None:
-            GLib.idle_add(self._show_ready)
+            GLib.idle_add(self._hide)
 
-    def _show_ready(self):
-        self.label.set_text("●  Ready")
-        self.window.set_visible(True)
-        GLib.timeout_add(120, self._place_bottom_center)
+    def _hide(self):
+        self.window.set_visible(False)
+        self._return_focus_window = None
         return GLib.SOURCE_REMOVE

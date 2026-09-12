@@ -99,6 +99,9 @@ class DictationController:
         return (session, target_window, capture, None)
 
     def _finish_recording(self, session, target_window, capture, error):
+        # Keep the overlay visible only while audio is being captured. The
+        # recorded clip may still be transcribing after the pill is hidden.
+        self.overlay.hide()
         if error is not None:
             self._error(session, "Microphone unavailable", 1.4)
             return
@@ -119,7 +122,9 @@ class DictationController:
             return session == self._session
 
     def _status(self, session, message):
-        if self._is_current(session):
+        with self._lock:
+            is_listening = session == self._session and self._recording
+        if is_listening:
             self.overlay.show(message)
 
     def _error(self, session, message, delay):
@@ -129,7 +134,7 @@ class DictationController:
     def _dismiss_after(self, session, delay):
         time.sleep(delay)
         if self._is_current(session):
-            self.overlay.ready()
+            self.overlay.hide()
 
     def _transcribe_and_insert(self, session, capture, target_window):
         path = None

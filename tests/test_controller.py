@@ -8,13 +8,13 @@ from flow.controller import DictationController
 class Overlay:
     def __init__(self):
         self.messages = []
-        self.ready_count = 0
+        self.hidden = 0
 
     def show(self, message):
         self.messages.append(message)
 
-    def ready(self):
-        self.ready_count += 1
+    def hide(self):
+        self.hidden += 1
 
 
 class Recorder:
@@ -66,7 +66,8 @@ def test_rejects_short_and_silent_capture_without_provider(monkeypatch):
     assert item.recorder.started == 1
     item.stop()
     assert short_provider.calls == 0
-    assert overlay.messages[-1] == "Recording too short"
+    assert overlay.messages == ["●   Listening"]
+    assert overlay.hidden >= 1
     item._pool.shutdown(wait=True)
 
     silent_provider = Provider()
@@ -74,7 +75,8 @@ def test_rejects_short_and_silent_capture_without_provider(monkeypatch):
     item.start()
     item.stop()
     assert silent_provider.calls == 0
-    assert overlay.messages[-1] == "No speech detected"
+    assert overlay.messages == ["●   Listening"]
+    assert overlay.hidden >= 1
     item._pool.shutdown(wait=True)
 
 
@@ -92,7 +94,7 @@ def test_audio_file_is_removed_after_provider_failure(tmp_path, monkeypatch):
     item._transcribe_and_insert(1, capture(), "window-1")
     assert not path.exists()
     assert inserted == []
-    assert overlay.messages[-1] == "Transcription failed"
+    assert overlay.messages == []
     item._pool.shutdown(wait=True)
 
 
@@ -102,9 +104,9 @@ def test_transcript_is_inserted_without_logging_or_duplicate_submission(monkeypa
     item, overlay = controller(Recorder(capture()), provider, inserted, monkeypatch)
     item._transcribe_and_insert(1, capture(), "window-1")
     assert inserted == [("hello", {"target_window": "window-1", "restore_delay": 0.6})]
-    assert overlay.messages[-1] == "✓   Done"
     item._pool.shutdown(wait=True)
-    assert overlay.ready_count == 1
+    assert overlay.messages == []
+    assert overlay.hidden == 1
 
 
 def test_handsfree_toggles_recording_and_ptt_release_does_not_stop_it(monkeypatch):
