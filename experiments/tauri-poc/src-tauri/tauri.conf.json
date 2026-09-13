@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Flow Linux Tauri POC",
+  "version": "0.1.0",
+  "identifier": "dev.flowlinux.tauri-poc",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Flow Linux Tauri POC",
+        "url": "index.html",
+        "width": 520,
+        "height": 360,
+        "visible": false,
+        "center": true,
+        "resizable": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.png"]
+  }
+}
