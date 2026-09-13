@@ -1,104 +1,50 @@
 # Flow Linux
 
-Flow Linux is a small background dictation app for Kali/Debian XFCE on X11. Hold a shortcut, speak, release, and Flow sends the recording to Groq before pasting the transcript into the window that was active when recording began. A non-focusable status pill appears above the active app on its monitor only while recording; it stays hidden when idle and during transcription.
+Flow is a small X11 desktop dictation app built with Tauri and Rust. Hold **Ctrl+Super**, speak, then release either key to transcribe and paste into the window that was active when recording began. The floating listening pill appears during microphone capture and stays hidden at idle. A tray icon keeps Flow running in the background.
 
 ## Requirements
 
-- Kali Linux or Debian with XFCE on X11
-- Python 3.11 or newer, GTK 4 and GTK 3 introspection, and PortAudio
-- `xclip`, `xdotool`, `xrandr`, and `gapplication`
-- A microphone and a Groq API key with access to `whisper-large-v3-turbo`
+- Kali/Debian Linux, X11, and a working PipeWire microphone
+- Rust/Cargo for building from source
+- `pw-record`, `curl`, `xclip`, `xdotool`, and `sqlite3`
+- A Groq API key with access to `whisper-large-v3-turbo`
 
-Wayland is not supported: global key handling, tray integration, window activation, and text insertion rely on X11/XFCE behavior.
+Wayland is not supported yet. Global shortcuts, focus restoration, and paste-back use X11 behavior.
 
 ## Install
 
-Install the native dependencies:
-
-```sh
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip python3-gi \
-  gir1.2-gtk-4.0 gir1.2-gtk-3.0 python3-numpy libportaudio2 portaudio19-dev \
-  python3-pytest xclip xdotool x11-xserver-utils libglib2.0-bin
-```
-
-Then run the per-user installer from the project directory:
+Install the system packages and Rust toolchain if they are not already available. On Debian/Kali, the desktop build libraries include GTK/WebKitGTK and AppIndicator development packages. Then run:
 
 ```sh
 ./install.sh
 ```
 
-The installer creates a background launcher, an applications-menu entry, and an XFCE login autostart entry. On first launch, Flow creates `~/.config/flow-linux/config.toml` with private file permissions. If an older `~/.config/flow-linux/.env` or project `.env` exists, Flow migrates those values to TOML once and leaves the old file untouched.
+The installer builds the Rust app and replaces the old Python launcher at `~/.local/bin/flow-linux`. It removes only the retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
 
-Open **Flow Linux** from the desktop applications menu, choose **Settings** from its tray icon, or run:
-
-```sh
-~/.local/bin/flow-linux --settings
-```
-
-Enter the Groq API key in Settings. The key is stored in `config.toml`, which is mode `0600` and ignored by Git. Settings also let you select the microphone, language, model, hands-free mode, login autostart, and whether to save transcription history.
+Open **Flow Linux** from the application menu or tray. Enter or confirm the Groq API key in Settings. Settings live in `~/.config/flow-linux/config.toml` with private file permissions. An existing TOML file is loaded as-is; if only the older `.env` exists, Flow imports its Groq key, model, and language without deleting it.
 
 ## Use
 
-- **Push-to-talk:** focus a text field, hold **Ctrl+Super**, speak, then release either modifier. This keeps the existing push-to-talk behavior.
-- **Hands-free:** when enabled in Settings, press **Ctrl+Super+Space** once to start continuous recording, then press the same chord again to stop and transcribe.
-- Right-click the tray icon for **History**, **Settings**, or **Quit Flow Linux**. Clicking the icon opens Settings.
+- **Push to talk:** focus a text field, hold **Ctrl+Super**, speak, and release either modifier.
+- **Hands-free:** enable the option in Settings, then press **Ctrl+Super+Space** to start listening and press it again to stop and transcribe.
+- Use the tray menu to open Flow or quit. Closing the main window hides it to the tray.
 
-The app starts hidden in the background at login. Turn off **Start Flow automatically when I log in** in Settings to remove the autostart entry. The applications-menu launcher always opens Settings.
+The overlay appears only while listening. Audio is captured from the system default PipeWire source, kept in memory during recording, written to a private temporary WAV file for the Groq request, then deleted. The API key is stored in the private config and passed to curl through a private temporary config file, not in process arguments.
 
-## Local transcription history
+## Settings and history
 
-History is opt-in. Turn on **Save transcription history** in Settings to save successful transcripts locally. The database is `~/.local/share/flow-linux/history.db` (or `$XDG_DATA_HOME/flow-linux/history.db`), protected with private directory/file permissions. It stores transcript text, timestamp, recording duration, provider, model, and whether insertion succeeded; it never stores audio, syncs to a cloud service, or sends telemetry. The oldest entries are automatically removed above 500 records.
+Settings include the Groq key, model, language, hands-free mode, login autostart, and optional local history. The microphone uses the system default PipeWire source. Existing PortAudio device numbers are retained in the config for compatibility but are not used by PipeWire.
 
-Choose **History** from the tray menu to search recent dictations, copy a transcript, delete one entry, or clear all history. If paste fails after transcription, Flow keeps the transcript in History and sends a desktop notification with a link to it. Turn **Save transcription history** off in Settings to stop saving future transcripts; existing entries remain until deleted or cleared. With history off, dictation and paste work as usual, but failed insertion cannot be recovered from History.
+When history is enabled, Flow stores transcript text, timestamp, duration, provider, model, and paste status in `~/.local/share/flow-linux/history.db` (or `$XDG_DATA_HOME/flow-linux/history.db`). It stores no audio, sends no telemetry, and keeps at most 500 entries. The History tab can search or delete saved transcripts. The existing Python app database is used directly, without conversion.
 
-Audio is temporary and deleted after each transcription attempt. Logs report timing and audio level but do not include dictated words, API keys, or audio data.
-
-## Configuration file
-
-Settings are stored at `~/.config/flow-linux/config.toml` (or `$XDG_CONFIG_HOME/flow-linux/config.toml`). The default values are:
-
-```toml
-[transcription]
-groq_api_key = ""
-model = "whisper-large-v3-turbo"
-language = "en"
-api_timeout = 45
-
-[audio]
-input_device = ""
-minimum_duration = 0.35
-silence_threshold = 220
-
-[shortcuts]
-push_to_talk = "ctrl+super"
-handsfree_enabled = true
-
-[app]
-autostart = true
-save_history = false
-clipboard_restore_delay = 0.6
-```
-
-An empty `input_device` uses the system default. To list available devices during troubleshooting:
+## Development and checks
 
 ```sh
-python3 -c 'import sounddevice as sd; print(sd.query_devices())'
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo test --offline --manifest-path src-tauri/Cargo.toml
+cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
-## Development and tests
+The main Rust modules are under `src-tauri/src/`; the local Tauri UI is under `ui/`. Runtime dependencies are system programs, so they do not add network-fetched Rust crates to the application.
 
-```sh
-python3 -m venv --system-site-packages .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-python -m pytest -q
-```
-
-The main application and floating status overlay use GTK 4. A small separate GTK 3 process owns the X11 tray icon so GTK 3 and GTK 4 do not load into the same process. `Gtk.Application` actions let the tray and launcher open Settings or quit the background instance.
-
-## Manual XFCE/X11 check
-
-After installing and entering a Groq key in Settings, open an editor and test both shortcuts. Confirm the listening pill appears only during recording, stays at the bottom of the active monitor without taking focus, and hides when capture ends. Confirm text appears at the cursor and a second dictation works immediately. Also test a short tap, silence, and a temporary network failure; each should leave the background app running. Check that the previous text clipboard contents are restored after a successful paste. These desktop and live-audio checks need a real XFCE/X11 session, microphone, and Groq credentials.
-
-Clipboard restoration covers text and is best-effort; other clipboard target types may not be preserved.
+For a desktop smoke test, launch Flow in an X11 session, open a text editor, hold the shortcut while speaking, and verify the pill appears only during capture and that the transcript is pasted into the editor. Test with a real Groq key to verify the network transcription path. Microphone and Groq live checks require a desktop session, microphone, internet access, and API credentials.

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flow Linux</title>
+  <style>
+    :root{font:15px system-ui,sans-serif;color:#f5f5fb;background:#11131a;color-scheme:dark;--muted:#a5a9b7;--line:#303442;--panel:#1a1d26;--accent:#7766f3}
+    *{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;margin:0}h2{font-size:18px;margin:0 0 18px}p{color:var(--muted);line-height:1.5}.top{display:flex;align-items:center;justify-content:space-between}.status{margin-top:22px;border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:12px}.dot{width:10px;height:10px;border-radius:99px;background:#8a90a0}.dot.active{background:#fe587c;box-shadow:0 0 12px #fe587c}.status-text{font-weight:600}.tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin-top:24px}.tab{border:0;background:none;color:var(--muted);padding:11px 14px;cursor:pointer;font:inherit}.tab.selected{color:#fff;border-bottom:2px solid var(--accent)}section.panel{padding:20px 0}label{display:block;color:#d9dae3;margin:14px 0 7px}input[type=text],input[type=password],input[type=number]{width:100%;padding:10px 12px;background:#11131a;color:#fff;border:1px solid var(--line);border-radius:8px;font:inherit}input:focus{outline:1px solid var(--accent)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}.check{display:flex;align-items:center;gap:9px;margin:14px 0;color:#e1e2ea}.check input{accent-color:var(--accent)}.note{font-size:13px}.actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}button.action{border:0;border-radius:8px;padding:9px 14px;background:var(--accent);color:white;font:inherit;cursor:pointer}button.secondary{background:#303442}button.danger{background:#56303b}.message{min-height:22px;color:#c4bfff;font-size:13px;margin-top:10px}.history-head{display:flex;gap:10px}.history-head input{flex:1}.entry{padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-top:10px}.entry-text{white-space:pre-wrap;overflow-wrap:anywhere;color:#f1f1f6}.meta{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:10px}.entry button{float:right;border:0;color:#d9a9b2;background:transparent;cursor:pointer}.hidden{display:none}small{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="top"><div><h1>Flow Linux</h1><small>Private voice dictation for your desktop</small></div></div>
+  <div class="status"><span id="dot" class="dot"></span><span id="status" class="status-text">Ready · hold Ctrl+Super to dictate</span></div>
+  <p>Hold <b>Ctrl + Super</b> while speaking. Release either key to transcribe and paste into the window you were using. Press <b>Ctrl + Super + Space</b> twice to start and stop hands-free listening.</p>
+  <nav class="tabs"><button class="tab selected" data-tab="settings">Settings</button><button class="tab" data-tab="history">History</button></nav>
+  <section id="settings" class="panel">
+    <h2>Transcription</h2>
+    <label for="key">Groq API key</label><input id="key" type="password" autocomplete="off" placeholder="Paste your Groq API key">
+    <div class="grid"><div><label for="model">Model</label><input id="model" type="text"></div><div><label for="language">Language</label><input id="language" type="text"></div></div>
+    <p class="note">Audio is captured from your system default microphone through PipeWire and sent to Groq only when you release the shortcut. Audio is held in memory and a private temporary WAV file, then deleted after the request.</p>
+    <h2>Behavior</h2>
+    <label class="check"><input id="handsfree" type="checkbox">Enable Ctrl + Super + Space hands-free toggle</label>
+    <label class="check"><input id="autostart" type="checkbox">Start Flow automatically when I log in</label>
+    <label class="check"><input id="save-history" type="checkbox">Save transcript history on this device</label>
+    <p class="note">History stores text only and keeps up to 500 entries. Existing history is preserved.</p>
+    <div class="actions"><button id="save" class="action">Save settings</button></div><div id="settings-message" class="message"></div>
+  </section>
+  <section id="history" class="panel hidden">
+    <div class="history-head"><input id="search" type="text" placeholder="Search saved transcripts"><button id="clear-history" class="action danger">Clear all</button></div>
+    <div id="entries"></div><div id="history-message" class="message"></div>
+  </section>
+  <script type="module">
+    const {invoke}=window.__TAURI__.core; const {listen}=window.__TAURI__.event;
+    const byId=id=>document.getElementById(id); let config;
+    function showStatus(message,active=false){byId('status').textContent=message;byId('dot').classList.toggle('active',active)}
+    async function loadConfig(){config=await invoke('get_config');byId('key').value=config.transcription.groq_api_key;byId('model').value=config.transcription.model;byId('language').value=config.transcription.language;byId('handsfree').checked=config.shortcuts.handsfree_enabled;byId('autostart').checked=config.app.autostart;byId('save-history').checked=config.app.save_history}
+    async function saveConfig(){config.transcription.groq_api_key=byId('key').value.trim();config.transcription.model=byId('model').value.trim()||'whisper-large-v3-turbo';config.transcription.language=byId('language').value.trim()||'en';config.shortcuts.handsfree_enabled=byId('handsfree').checked;config.app.autostart=byId('autostart').checked;config.app.save_history=byId('save-history').checked;try{await invoke('save_config',{config});byId('settings-message').textContent='Settings saved securely.'}catch(e){byId('settings-message').textContent=String(e)}}
+    function escapeHtml(value){return value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+    async function loadHistory(){try{const entries=await invoke('history_list',{search:byId('search').value});byId('entries').innerHTML=entries.length?entries.map(e=>`<article class="entry"><button data-delete="${e.id}">Delete</button><div class="entry-text">${escapeHtml(e.transcript)}</div><div class="meta"><span>${new Date(e.created_at).toLocaleString()} · ${Number(e.duration).toFixed(1)}s</span><span>${escapeHtml(e.insertion_status)}</span></div></article>`).join(''):'<p>No saved dictations yet.</p>';byId('history-message').textContent=''}catch(e){byId('history-message').textContent=String(e)}}
+    document.querySelectorAll('.tab').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('selected',b===button));document.querySelectorAll('section.panel').forEach(p=>p.classList.toggle('hidden',p.id!==button.dataset.tab));if(button.dataset.tab==='history')loadHistory()}));
+    byId('save').addEventListener('click',saveConfig);byId('search').addEventListener('input',loadHistory);
+    byId('entries').addEventListener('click',async event=>{const id=event.target.dataset.delete;if(id){await invoke('history_delete',{id:Number(id)});loadHistory()}});
+    byId('clear-history').addEventListener('click',async()=>{if(confirm('Delete all saved transcript history?')){await invoke('history_clear');loadHistory()}});
+    await loadConfig();showStatus(await invoke('get_status'));
+    await listen('flow-status',({payload})=>showStatus(payload.message,payload.active));
+    await listen('flow-status-refresh',async()=>showStatus(await invoke('get_status')));
+    await listen('history-updated',()=>{if(!byId('history').classList.contains('hidden'))loadHistory()});
+  </script>
+</body>
+</html>

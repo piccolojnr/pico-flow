@@ -1,3 +1,8 @@
+# Rust / Tauri
+/src-tauri/target/
+/src-tauri/gen/schemas/
+
+# Python legacy artifacts (kept ignored during migration cleanup)
 .venv/
 .env
 config.toml

@@ -1,63 +1,35 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-SOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
-CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
-APP_DIR="$DATA_HOME/flow-linux"
-CONFIG_DIR="$CONFIG_HOME/flow-linux"
-BIN_DIR=${XDG_BIN_HOME:-"$HOME/.local/bin"}
-APPLICATIONS_DIR="$DATA_HOME/applications"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN_DIR="${HOME}/.local/bin"
+DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/flow-linux"
+CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+mkdir -p "${BIN_DIR}" "${DATA_DIR}" "${HOME}/.local/share/applications"
 
-for command in python3 xclip xdotool xrandr gapplication; do
-    if ! command -v "$command" >/dev/null 2>&1; then
-        echo "Missing required command: $command" >&2
-        echo "Install the Kali/Debian packages listed in README.md, then retry." >&2
-        exit 1
-    fi
-done
+cargo build --release --locked --manifest-path "${ROOT}/src-tauri/Cargo.toml"
+install -m 0755 "${ROOT}/src-tauri/target/release/flow-linux" "${BIN_DIR}/flow-linux.new"
+mv -f "${BIN_DIR}/flow-linux.new" "${BIN_DIR}/flow-linux"
 
-mkdir -p "$APP_DIR" "$CONFIG_DIR" "$BIN_DIR" "$CONFIG_HOME/autostart" "$APPLICATIONS_DIR"
-cp "$SOURCE_DIR/app.py" "$APP_DIR/app.py"
-rm -rf "$APP_DIR/flow"
-cp -R "$SOURCE_DIR/flow" "$APP_DIR/flow"
-cp "$SOURCE_DIR/requirements.txt" "$APP_DIR/requirements.txt"
-
-if [ ! -x "$APP_DIR/.venv/bin/python" ]; then
-    python3 -m venv --system-site-packages "$APP_DIR/.venv"
-fi
-"$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
-
-cat > "$BIN_DIR/flow-linux" <<EOF
-#!/bin/sh
-cd "$CONFIG_DIR"
-exec "$APP_DIR/.venv/bin/python" "$APP_DIR/app.py" "\$@"
-EOF
-chmod 755 "$BIN_DIR/flow-linux"
-
-cat > "$APPLICATIONS_DIR/flow-linux.desktop" <<EOF
+cat > "${HOME}/.local/share/applications/flow-linux.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Flow Linux
-Comment=Push-to-talk dictation settings
-Exec="$BIN_DIR/flow-linux" --settings
+Comment=Private voice dictation
+Exec=${BIN_DIR}/flow-linux --settings
 Icon=audio-input-microphone
 Terminal=false
-StartupNotify=false
-Categories=Utility;Accessibility;
-EOF
-chmod 644 "$APPLICATIONS_DIR/flow-linux.desktop"
+Categories=Utility;AudioVideo;
+DESKTOP
 
-cat > "$CONFIG_HOME/autostart/flow-linux.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Flow Linux
-Comment=Background push-to-talk dictation
-Exec="$BIN_DIR/flow-linux" --background
-Terminal=false
-X-GNOME-Autostart-enabled=true
-EOF
-chmod 644 "$CONFIG_HOME/autostart/flow-linux.desktop"
+# Retire the former Python runtime and launcher artifacts while keeping config,
+# credentials, and the user's SQLite history database intact.
+rm -rf "${DATA_DIR}/.venv" "${DATA_DIR}/flow" "${DATA_DIR}/app.py" "${DATA_DIR}/requirements.txt"
+chmod 700 "${DATA_DIR}"
+if [[ ! -x "${BIN_DIR}/flow-linux" ]]; then echo "Flow install failed" >&2; exit 1; fi
 
-echo "Installed. Legacy .env settings migrate to $CONFIG_DIR/config.toml if no TOML file exists."
-echo "Log out/in or run $BIN_DIR/flow-linux to start Flow now."
+printf 'Installed Flow Linux (Tauri) at %s\n' "${BIN_DIR}/flow-linux"
+printf 'Your config and history database were preserved under %s and %s\n' "${CONFIG_HOME}/flow-linux" "${DATA_DIR}"
+missing=()
+for tool in pw-record curl xclip xdotool sqlite3; do command -v "${tool}" >/dev/null || missing+=("${tool}"); done
+if ((${#missing[@]})); then printf 'Install these runtime tools to enable all features: %s\n' "${missing[*]}"; fi
