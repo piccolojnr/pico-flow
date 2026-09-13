@@ -13,6 +13,63 @@ pub fn active_window() -> Option<String> {
         .map(|b| String::from_utf8_lossy(&b).trim().to_string())
         .filter(|s| !s.is_empty())
 }
+fn window_class(window: &str) -> Option<String> {
+    output(Command::new("xdotool").args(["getwindowclassname", window]))
+        .map(|b| String::from_utf8_lossy(&b).trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+}
+fn window_title(window: &str) -> Option<String> {
+    output(Command::new("xdotool").args(["getwindowname", window]))
+        .map(|b| String::from_utf8_lossy(&b).trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+}
+fn is_terminal(class: &str, title: &str) -> bool {
+    let class = class.to_ascii_lowercase();
+    let title = title.to_ascii_lowercase();
+    [
+        "terminal",
+        "xterm",
+        "kitty",
+        "alacritty",
+        "wezterm",
+        "konsole",
+        "foot",
+        "urxvt",
+        "rxvt",
+        "st-",
+        "stterm",
+        "tilix",
+        "terminator",
+        "qterminal",
+        "lxterminal",
+        "mate-terminal",
+        "ghostty",
+        "contour",
+        "hyper",
+        "tabby",
+        "rio",
+        "cool-retro-term",
+        "blackbox",
+        "ptyxis",
+        "kgx",
+    ]
+    .iter()
+    .any(|name| class.contains(name) || title.contains(name))
+}
+fn paste_shortcut(class: Option<&str>, title: Option<&str>) -> &'static str {
+    let class = class.unwrap_or_default().to_ascii_lowercase();
+    let title = title.unwrap_or_default().to_ascii_lowercase();
+    if class.contains("codex") || title.contains("codex") {
+        // Codex CLI treats Ctrl+V as an image attachment command. Shift+Insert
+        // asks the terminal to paste the text clipboard as bracketed input.
+        "shift+Insert"
+    } else if is_terminal(&class, &title) {
+        // Avoid forwarding Ctrl+V to terminal TUIs where it can mean image paste.
+        "shift+Insert"
+    } else {
+        "ctrl+v"
+    }
+}
 fn write_clipboard(value: &[u8]) -> Result<(), String> {
     let mut child = Command::new("xclip")
         .args(["-selection", "clipboard", "-i"])
@@ -34,24 +91,22 @@ fn write_clipboard(value: &[u8]) -> Result<(), String> {
     }
     Ok(())
 }
-pub fn paste(text: &str, target: Option<&str>, restore_delay: f64) -> Result<(), String> {
+pub fn paste(text: &str, restore_delay: f64) -> Result<(), String> {
     if text.is_empty() {
         return Err("No text to insert".into());
     }
+    // Paste into the window focused when transcription finishes. Dictation may
+    // take several seconds, during which the user can move to another window.
+    let target = active_window();
+    let class = target.as_deref().and_then(window_class);
+    let title = target.as_deref().and_then(window_title);
     let previous = output(Command::new("xclip").args(["-selection", "clipboard", "-o"]));
     let write_result = write_clipboard(text.as_bytes());
     let paste_result = write_result.and_then(|()| {
-        if let Some(window) = target {
-            let status = Command::new("xdotool")
-                .args(["windowactivate", "--sync", window])
-                .status()
-                .map_err(|_| "Could not return to the original window; install xdotool")?;
-            if !status.success() {
-                return Err("Could not return focus to the original window".into());
-            }
-        }
+        let shortcut = paste_shortcut(class.as_deref(), title.as_deref());
+        println!("[Flow] Inserting text with {shortcut}");
         let status = Command::new("xdotool")
-            .args(["key", "--clearmodifiers", "ctrl+v"])
+            .args(["key", "--clearmodifiers", shortcut])
             .status()
             .map_err(|_| "Text insertion failed; install xdotool")?;
         if status.success() {
@@ -65,4 +120,52 @@ pub fn paste(text: &str, target: Option<&str>, restore_delay: f64) -> Result<(),
         let _ = write_clipboard(&previous);
     }
     paste_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_terminal, paste_shortcut};
+
+    #[test]
+    fn recognizes_common_terminal_windows() {
+        for class in [
+            "XTerm",
+            "kitty",
+            "Alacritty",
+            "org.gnome.Terminal",
+            "xfce4-terminal",
+            "com.mitchellh.ghostty",
+            "st-256color",
+            "org.wezfurlong.wezterm",
+        ] {
+            assert!(
+                is_terminal(class, ""),
+                "{class} should be treated as a terminal"
+            );
+        }
+    }
+
+    #[test]
+    fn uses_regular_paste_for_non_terminal_windows() {
+        assert_eq!(paste_shortcut(Some("code"), Some("editor")), "ctrl+v");
+        assert_eq!(paste_shortcut(None, None), "ctrl+v");
+    }
+
+    #[test]
+    fn uses_text_paste_shortcut_for_terminals_and_codex() {
+        assert_eq!(paste_shortcut(Some("kitty"), None), "shift+Insert");
+        assert_eq!(
+            paste_shortcut(Some("xfce4-terminal"), Some("codex")),
+            "shift+Insert"
+        );
+        assert_eq!(
+            paste_shortcut(None, Some("Codex CLI — ~/project")),
+            "shift+Insert"
+        );
+    }
+
+    #[test]
+    fn recognizes_terminal_from_window_title() {
+        assert!(is_terminal("unknown-window", "Codex - Terminal"));
+    }
 }

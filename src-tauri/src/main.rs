@@ -27,7 +27,6 @@ struct State {
     config: Mutex<Config>,
     recorder: Mutex<Recorder>,
     mode: Mutex<Option<Mode>>,
-    target: Mutex<Option<String>>,
     status: Mutex<String>,
 }
 
@@ -111,6 +110,9 @@ fn status(app: &AppHandle, message: &str, active: bool) {
         "flow-status",
         serde_json::json!({"message": message, "active": active}),
     );
+    if !active {
+        set_overlay(app, false, None);
+    }
 }
 fn parse_monitor_geometry(geometry: &str) -> Option<(i32, i32, i32, i32)> {
     let x_separator = geometry.find('x')?;
@@ -222,9 +224,6 @@ fn start_recording(app: &AppHandle, mode: Mode) {
         Ok(()) => {
             *current_mode = Some(mode);
             set_overlay(app, true, target.as_deref());
-            if let Ok(mut t) = state.target.lock() {
-                *t = target;
-            }
             status(
                 app,
                 if mode == Mode::HandsFree {
@@ -261,15 +260,13 @@ fn stop_recording(app: &AppHandle, allow_handsfree: bool) {
     if mode.is_none() {
         return;
     }
-    set_overlay(app, false, None);
     let capture = state
         .recorder
         .lock()
         .map_err(|_| "Microphone state unavailable".to_string())
         .and_then(|mut r| r.stop());
-    let target = state.target.lock().ok().and_then(|mut t| t.take());
     match capture {
-        Ok(capture) => finish_capture(app.clone(), capture, target),
+        Ok(capture) => finish_capture(app.clone(), capture),
         Err(error) => report_error(app.clone(), error),
     }
 }
@@ -288,7 +285,7 @@ fn report_error(app: AppHandle, message: String) {
         }
     });
 }
-fn finish_capture(app: AppHandle, capture: Capture, target: Option<String>) {
+fn finish_capture(app: AppHandle, capture: Capture) {
     let Some(state) = app.try_state::<State>() else {
         let _ = fs::remove_file(capture.wav_path);
         return;
@@ -308,7 +305,7 @@ fn finish_capture(app: AppHandle, capture: Capture, target: Option<String>) {
         report_error(app, "No speech detected".into());
         return;
     }
-    status(&app, "Transcribing…", false);
+    status(&app, "Transcribing…", true);
     thread::spawn(move || {
         let result = transcription::transcribe(
             &capture.wav_path,
@@ -327,11 +324,7 @@ fn finish_capture(app: AppHandle, capture: Capture, target: Option<String>) {
                 } else {
                     None
                 };
-                match clipboard::paste(
-                    text.trim(),
-                    target.as_deref(),
-                    config.app.clipboard_restore_delay,
-                ) {
+                match clipboard::paste(text.trim(), config.app.clipboard_restore_delay) {
                     Ok(()) => {
                         if let Some(id) = entry_id {
                             history::mark(id, "inserted");
@@ -471,7 +464,6 @@ fn main() {
             config: Mutex::new(config),
             recorder: Mutex::new(Recorder::default()),
             mode: Mutex::new(None),
-            target: Mutex::new(None),
             status: Mutex::new("Ready · hold Ctrl+Super to dictate".into()),
         })
         .invoke_handler(tauri::generate_handler![

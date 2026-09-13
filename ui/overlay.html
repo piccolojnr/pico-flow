@@ -6,13 +6,33 @@
   <style>
     html, body { width: 320px; height: 64px; min-width: 320px; min-height: 64px; margin: 0; overflow: hidden; background: transparent; }
     body { display: grid; place-items: center; font: 14px system-ui, sans-serif; color: #fff; }
-    .pill { display: flex; align-items: center; gap: 11px; width: 264px; height: 48px; padding: 0 18px; border: 1px solid #8877ff; border-radius: 28px; background: rgba(29, 27, 46, .96); box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: #ff5d7d; box-shadow: 0 0 12px #ff5d7d; }
-    .label { font-weight: 600; }
-    .hint { margin-left: auto; color: #c4bfd9; font-size: 12px; }
+    .pill { display: flex; align-items: center; gap: 11px; width: 292px; height: 50px; padding: 0 17px; border: 1px solid #b05dff; border-radius: 28px; background: rgba(29, 27, 46, .97); box-shadow: 0 8px 30px rgba(0, 0, 0, .35); transition: border-color .16s ease, background .16s ease; }
+    .dot { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: #ff5d7d; box-shadow: 0 0 12px #ff5d7d; }
+    .label { font-size: 13px; font-weight: 650; white-space: nowrap; }
+    .hint { margin-left: auto; color: #c4bfd9; font-size: 10px; white-space: nowrap; }
+    body[data-state="handsfree"] .pill { border-color: #ae79ff; background: rgba(39, 27, 58, .98); }
+    body[data-state="handsfree"] .dot { background: #bd8cff; box-shadow: 0 0 12px #bd8cff; }
+    body[data-state="transcribing"] .pill { border-color: #64b5ff; background: rgba(22, 38, 57, .98); }
+    body[data-state="transcribing"] .dot { background: #76c5ff; box-shadow: 0 0 12px #76c5ff; animation: pulse 1s ease-in-out infinite alternate; }
+    @keyframes pulse { to { opacity: .45; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
   </style>
 </head>
 <body>
-  <div class="pill"><span class="dot"></span><span class="label">Listening</span><span class="hint">Release to stop</span></div>
+  <div class="pill" role="status" aria-live="polite" aria-atomic="true"><span class="dot" aria-hidden="true"></span><span id="label" class="label">Listening</span><span id="hint" class="hint">Release to finish</span></div>
+  <script type="module">
+    const { listen } = window.__TAURI__.event;
+    const label = document.getElementById('label');
+    const hint = document.getElementById('hint');
+    function update(payload) {
+      const message = payload.message || 'Listening';
+      label.textContent = message;
+      const normalized = message.toLowerCase();
+      const state = normalized.includes('hands-free') ? 'handsfree' : normalized.includes('transcrib') ? 'transcribing' : 'listening';
+      document.body.dataset.state = state;
+      hint.textContent = state === 'handsfree' ? 'Ctrl + Super + Space to stop' : state === 'transcribing' ? 'Please wait…' : 'Release to finish';
+    }
+    await listen('flow-status', ({ payload }) => update(payload));
+  </script>
 </body>
 </html>

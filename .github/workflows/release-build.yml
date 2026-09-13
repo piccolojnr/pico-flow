@@ -1,0 +1,53 @@
+name: Linux release build
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Run tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build release binary
+        run: cargo build --locked --release --manifest-path src-tauri/Cargo.toml
+
+      - name: Package binary
+        run: tar -C src-tauri/target/release -czf flow-linux-linux-x86_64.tar.gz flow-linux
+
+      - name: Upload release build
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-linux-linux-x86_64
+          path: flow-linux-linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
