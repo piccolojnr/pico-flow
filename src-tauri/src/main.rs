@@ -7,7 +7,9 @@ mod transcription;
 use audio::{Capture, Recorder};
 use config::Config;
 use rdev::{listen, EventType};
-use std::{collections::HashSet, fs, path::PathBuf, sync::Mutex, thread, time::Duration};
+use std::{
+    collections::HashSet, fs, path::PathBuf, process::Command, sync::Mutex, thread, time::Duration,
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -109,16 +111,83 @@ fn status(app: &AppHandle, message: &str, active: bool) {
         serde_json::json!({"message": message, "active": active}),
     );
 }
-fn set_overlay(app: &AppHandle, show: bool) {
+fn parse_monitor_geometry(geometry: &str) -> Option<(i32, i32, i32, i32)> {
+    let x_separator = geometry.find('x')?;
+    let width = geometry[..x_separator].split('/').next()?.parse().ok()?;
+    let (height, dimensions) = geometry[x_separator + 1..].split_once('/')?;
+    let height = height.parse().ok()?;
+    let offset_start = dimensions.find(['+', '-'])?;
+    let offsets = &dimensions[offset_start..];
+    let y_offset_start = offsets[1..].find(['+', '-'])? + 1;
+    Some((
+        offsets[..y_offset_start].parse().ok()?,
+        offsets[y_offset_start..].parse().ok()?,
+        width,
+        height,
+    ))
+}
+fn monitor_bounds_for_window(window_id: Option<&str>) -> Option<(i32, i32, i32, i32)> {
+    let output = Command::new("xrandr")
+        .args(["--listactivemonitors"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let monitors: Vec<_> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let geometry = line.split_whitespace().nth(2)?;
+            Some((line.contains('*'), parse_monitor_geometry(geometry)?))
+        })
+        .collect();
+
+    if let Some(id) = window_id {
+        if let Ok(output) = Command::new("xdotool")
+            .args(["getwindowgeometry", "--shell", id])
+            .output()
+        {
+            if output.status.success() {
+                let geometry = String::from_utf8_lossy(&output.stdout);
+                let values: std::collections::HashMap<_, _> = geometry
+                    .lines()
+                    .filter_map(|line| line.split_once('='))
+                    .collect();
+                let center_x = values.get("X")?.parse::<i32>().ok()?
+                    + values.get("WIDTH")?.parse::<i32>().ok()? / 2;
+                let center_y = values.get("Y")?.parse::<i32>().ok()?
+                    + values.get("HEIGHT")?.parse::<i32>().ok()? / 2;
+                if let Some((_, bounds)) = monitors.iter().find(|(_, (x, y, width, height))| {
+                    *x <= center_x
+                        && center_x < *x + *width
+                        && *y <= center_y
+                        && center_y < *y + *height
+                }) {
+                    return Some(*bounds);
+                }
+            }
+        }
+    }
+    monitors
+        .iter()
+        .find(|(primary, _)| *primary)
+        .or(monitors.first())
+        .map(|(_, bounds)| *bounds)
+}
+fn set_overlay(app: &AppHandle, show: bool, target_window: Option<&str>) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         if show {
             let _ = overlay.set_size(PhysicalSize::new(320, 64));
-            if let Ok(Some(monitor)) = overlay.primary_monitor() {
-                let size = monitor.size();
-                let pos = monitor.position();
+            let bounds = monitor_bounds_for_window(target_window).or_else(|| {
+                overlay.primary_monitor().ok().flatten().map(|monitor| {
+                    let size = monitor.size();
+                    let pos = monitor.position();
+                    (pos.x, pos.y, size.width as i32, size.height as i32)
+                })
+            });
+            if let Some((x, y, width, height)) = bounds {
                 let _ = overlay.set_position(PhysicalPosition::new(
-                    pos.x + (size.width as i32 - 320) / 2,
-                    pos.y + size.height as i32 - 100,
+                    x + (width - 320) / 2,
+                    y + height - 100,
                 ));
             }
             let _ = overlay.show();
@@ -151,10 +220,10 @@ fn start_recording(app: &AppHandle, mode: Mode) {
     match result {
         Ok(()) => {
             *current_mode = Some(mode);
+            set_overlay(app, true, target.as_deref());
             if let Ok(mut t) = state.target.lock() {
                 *t = target;
             }
-            set_overlay(app, true);
             status(
                 app,
                 if mode == Mode::HandsFree {
@@ -191,7 +260,7 @@ fn stop_recording(app: &AppHandle, allow_handsfree: bool) {
     if mode.is_none() {
         return;
     }
-    set_overlay(app, false);
+    set_overlay(app, false, None);
     let capture = state
         .recorder
         .lock()
@@ -456,6 +525,18 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parses_monitor_bounds_with_signed_offsets() {
+        assert_eq!(
+            super::parse_monitor_geometry("1920/300x1080/170+0+0"),
+            Some((0, 0, 1920, 1080))
+        );
+        assert_eq!(
+            super::parse_monitor_geometry("1920/520x1080/300-1920+0"),
+            Some((-1920, 0, 1920, 1080))
+        );
+    }
+
     #[test]
     fn releasing_one_control_key_keeps_modifier_chord_active() {
         let mut pressed = std::collections::HashSet::from([

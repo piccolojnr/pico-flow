@@ -6,7 +6,7 @@ Flow is a small X11 desktop dictation app built with Tauri and Rust. Hold **Ctrl
 
 - Kali/Debian Linux, X11, and a working PipeWire microphone
 - Rust/Cargo for building from source
-- `pw-record`, `curl`, `xclip`, `xdotool`, and `sqlite3`
+- `pw-record`, `curl`, `xclip`, `xdotool`, `xrandr`, and `sqlite3`
 - A Groq API key with access to `whisper-large-v3-turbo`
 
 Wayland is not supported yet. Global shortcuts, focus restoration, and paste-back use X11 behavior.

@@ -31,5 +31,5 @@ if [[ ! -x "${BIN_DIR}/flow-linux" ]]; then echo "Flow install failed" >&2; exit
 printf 'Installed Flow Linux (Tauri) at %s\n' "${BIN_DIR}/flow-linux"
 printf 'Your config and history database were preserved under %s and %s\n' "${CONFIG_HOME}/flow-linux" "${DATA_DIR}"
 missing=()
-for tool in pw-record curl xclip xdotool sqlite3; do command -v "${tool}" >/dev/null || missing+=("${tool}"); done
+for tool in pw-record curl xclip xdotool xrandr sqlite3; do command -v "${tool}" >/dev/null || missing+=("${tool}"); done
 if ((${#missing[@]})); then printf 'Install these runtime tools to enable all features: %s\n' "${missing[*]}"; fi
