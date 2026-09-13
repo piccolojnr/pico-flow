@@ -2,6 +2,7 @@ mod audio;
 mod clipboard;
 mod config;
 mod history;
+mod instance;
 mod transcription;
 
 use audio::{Capture, Recorder};
@@ -449,6 +450,17 @@ fn build_overlay(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 fn main() {
+    let show_window = std::env::args().any(|arg| arg == "--settings" || arg == "--show");
+    let claim = match instance::claim(show_window) {
+        Ok(claim) => claim,
+        Err(error) => {
+            eprintln!("[Flow] Could not coordinate the running instance: {error}");
+            std::process::exit(1);
+        }
+    };
+    let instance::Claim::Primary { listener, path } = claim else {
+        return;
+    };
     let config = config::load().unwrap_or_else(|error| {
         eprintln!("[Flow] Settings error: {error}");
         Config::default()
@@ -478,8 +490,9 @@ fn main() {
                 }
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             build_overlay(app)?;
+            instance::serve(app.handle().clone(), listener, path);
             let autostart = app
                 .state::<State>()
                 .config
@@ -510,7 +523,7 @@ fn main() {
                 })
                 .build(app)?;
             start_keyboard_listener(app.handle().clone());
-            if std::env::args().any(|arg| arg == "--settings" || arg == "--show") {
+            if show_window {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
