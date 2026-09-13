@@ -151,8 +151,11 @@ fn write_private_wav(samples: &[f32]) -> Result<PathBuf, String> {
             format!("Could not write temporary audio: {e}")
         })?;
     for value in pcm {
-        file.write_all(&value.to_le_bytes())
-            .map_err(|e| format!("Could not write temporary audio: {e}"))?;
+        if let Err(error) = file.write_all(&value.to_le_bytes()) {
+            drop(file);
+            let _ = fs::remove_file(&path);
+            return Err(format!("Could not write temporary audio: {error}"));
+        }
     }
     Ok(path)
 }

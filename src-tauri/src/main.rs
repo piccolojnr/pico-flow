@@ -411,6 +411,15 @@ fn main() {
         })
         .setup(|app| {
             build_overlay(app)?;
+            let autostart = app
+                .state::<State>()
+                .config
+                .lock()
+                .map(|config| config.app.autostart)
+                .unwrap_or(false);
+            if let Err(error) = set_autostart(autostart) {
+                eprintln!("[Flow] Could not update login startup: {error}");
+            }
             let open = MenuItem::with_id(app, "open", "Open Flow", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Flow", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;

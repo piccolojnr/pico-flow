@@ -1,6 +1,0 @@
-{
-  "identifier": "main-status",
-  "description": "Allow the main status window to listen for push-to-talk state updates.",
-  "windows": ["main"],
-  "permissions": ["core:event:allow-listen"]
-}
