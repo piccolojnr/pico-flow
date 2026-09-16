@@ -54,6 +54,10 @@ fn get_status(state: tauri::State<'_, State>) -> String {
         .unwrap_or_else(|_| "Status unavailable".into())
 }
 #[tauri::command]
+fn copy_to_clipboard(text: String) -> Result<(), String> {
+    clipboard::copy(&text)
+}
+#[tauri::command]
 fn save_config(
     app: AppHandle,
     state: tauri::State<'_, State>,
@@ -124,6 +128,18 @@ fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     .map_err(|e| format!("Could not update login startup: {e}"))
 }
 
+fn status_phase(message: &str) -> &'static str {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("hands-free") {
+        "handsfree"
+    } else if normalized.contains("transcrib") {
+        "transcribing"
+    } else if normalized.contains("listening") {
+        "listening"
+    } else {
+        "idle"
+    }
+}
 fn status(app: &AppHandle, message: &str, active: bool) {
     if let Some(state) = app.try_state::<State>() {
         if let Ok(mut last) = state.status.lock() {
@@ -132,7 +148,7 @@ fn status(app: &AppHandle, message: &str, active: bool) {
     }
     let _ = app.emit(
         "flow-status",
-        serde_json::json!({"message": message, "active": active}),
+        serde_json::json!({"message": message, "active": active, "phase": status_phase(message)}),
     );
     if !active {
         set_overlay(app, false, None);
@@ -518,6 +534,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             get_status,
+            copy_to_clipboard,
             save_config,
             history_list,
             history_delete,

@@ -1,6 +1,6 @@
 {
   "identifier": "default",
   "description": "Flow main window event access",
-  "windows": ["main"],
+  "windows": ["main", "overlay"],
   "permissions": ["core:event:allow-listen"]
 }

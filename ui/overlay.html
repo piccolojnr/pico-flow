@@ -49,7 +49,7 @@
       const message = payload.message || 'Listening';
       label.textContent = message;
       const normalized = message.toLowerCase();
-      const state = normalized.includes('hands-free') ? 'handsfree' : normalized.includes('transcrib') ? 'transcribing' : 'listening';
+      const state = payload.phase || (normalized.includes('hands-free') ? 'handsfree' : normalized.includes('transcrib') ? 'transcribing' : 'listening');
       document.body.dataset.state = state;
       hint.textContent = state === 'handsfree' ? 'Ctrl + Super + Space to stop' : state === 'transcribing' ? 'Finishing your words…' : 'Release to finish';
     }

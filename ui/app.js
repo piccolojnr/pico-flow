@@ -103,7 +103,7 @@
         const dateText = Number.isNaN(date.getTime()) ? entry.created_at : date.toLocaleString(undefined, {dateStyle:'medium',timeStyle:'short'});
         const failed = entry.insertion_status === 'failed';
         const status = failed ? 'Paste failed' : entry.insertion_status === 'inserted' ? 'Pasted' : 'Pending paste';
-        return `<article class="entry"><div class="entry-top"><time>${escapeHtml(dateText)}</time><button class="delete-entry" data-delete="${Number(entry.id)}" aria-label="Delete dictation from ${escapeHtml(dateText)}">Delete</button></div><p class="entry-text">${escapeHtml(entry.transcript)}</p><div class="meta"><span>${Number(entry.duration).toFixed(1)} sec</span><span>${escapeHtml(entry.provider)} / ${escapeHtml(entry.model)}</span><span class="outcome ${failed ? 'failed' : ''}">${status}</span></div></article>`;
+        return `<article class="entry"><div class="entry-top"><time>${escapeHtml(dateText)}</time><div class="entry-actions"><button class="copy-entry" data-copy="${escapeHtml(entry.transcript)}" aria-label="Copy dictation from ${escapeHtml(dateText)}">Copy</button><button class="delete-entry" data-delete="${Number(entry.id)}" aria-label="Delete dictation from ${escapeHtml(dateText)}">Delete</button></div></div><p class="entry-text">${escapeHtml(entry.transcript)}</p><div class="meta"><span>${Number(entry.duration).toFixed(1)} sec</span><span>${escapeHtml(entry.provider)} / ${escapeHtml(entry.model)}</span><span class="outcome ${failed ? 'failed' : ''}">${status}</span></div></article>`;
       }).join('') : emptyState(Boolean(search.trim()));
       message('history-message', config?.app.save_history === false ? 'History saving is off. Existing dictations are still available.' : '');
     } catch (error) {
@@ -131,6 +131,20 @@
     searchTimer = setTimeout(loadHistory, 160);
   });
   byId('entries').addEventListener('click', async event => {
+    const copyButton = event.target.closest('[data-copy]');
+    if (copyButton && bridge) {
+      const original = copyButton.textContent;
+      copyButton.disabled = true;
+      try {
+        await bridge.core.invoke('copy_to_clipboard', {text: copyButton.dataset.copy});
+        copyButton.textContent = 'Copied';
+        setTimeout(() => {copyButton.textContent = original; copyButton.disabled = false;}, 1400);
+      } catch (error) {
+        copyButton.disabled = false;
+        message('history-message', String(error), true);
+      }
+      return;
+    }
     const button = event.target.closest('[data-delete]');
     if (!button || !bridge) return;
     button.disabled = true;

@@ -7,6 +7,16 @@ pub fn active_window() -> Option<String> {
     None
 }
 
+pub fn copy(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("No text to copy".into());
+    }
+    Clipboard::new()
+        .map_err(|e| format!("Clipboard unavailable: {e}"))?
+        .set_text(text)
+        .map_err(|e| format!("Could not set clipboard text: {e}"))
+}
+
 pub fn paste(text: &str, restore_delay: f64) -> Result<(), String> {
     if text.is_empty() {
         return Err("No text to insert".into());

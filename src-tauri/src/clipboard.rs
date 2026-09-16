@@ -91,6 +91,12 @@ fn write_clipboard(value: &[u8]) -> Result<(), String> {
     }
     Ok(())
 }
+pub fn copy(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("No text to copy".into());
+    }
+    write_clipboard(text.as_bytes())
+}
 pub fn paste(text: &str, restore_delay: f64) -> Result<(), String> {
     if text.is_empty() {
         return Err("No text to insert".into());
