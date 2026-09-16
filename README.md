@@ -13,13 +13,13 @@ Wayland is not supported yet. Global shortcuts and paste-back use X11 behavior.
 
 ## Install
 
-The normal installer downloads the latest Linux AppImage from GitHub Releases, verifies it against the published `SHA256SUMS`, and installs it under `~/.local/opt/flow-linux`, with a stable launcher at `~/.local/bin/flow-linux`:
+The normal installer downloads the latest Linux Debian package from GitHub Releases, verifies it against the published `SHA256SUMS`, installs it with `apt`, and leaves a stable launcher at `~/.local/bin/flow-linux`. This uses the system GTK/WebKit libraries, which is the most reliable path on Debian/Kali:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/piccolojnr/pico-flow/master/install.sh | bash
 ```
 
-From a checkout, use `./install.sh --source` to build and install the current code; to pin a release, use `./install.sh --version 0.2.0`. The installer removes only retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
+From a checkout, use `./install.sh --source` to build and install the current code; to pin a release, use `./install.sh --version 0.2.0`. Use `./install.sh --appimage` only when you specifically want the portable bundle. The installer removes only retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
 
 On Debian/Kali, install the runtime tools with:
 
