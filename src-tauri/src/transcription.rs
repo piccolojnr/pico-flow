@@ -1,32 +1,12 @@
+use reqwest::blocking::{multipart, Client};
 use serde::Deserialize;
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
-};
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs, path::Path, time::Duration};
 
 #[derive(Deserialize)]
 struct Response {
     text: Option<String>,
-}
-struct PrivateTempFile(PathBuf);
-impl Drop for PrivateTempFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-fn curl_quote(value: &str) -> String {
-    format!(
-        "\"{}\"",
-        value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-    )
 }
 pub fn transcribe(
     wav: &Path,
@@ -44,7 +24,6 @@ pub fn transcribe(
         timeout,
     )
 }
-
 fn transcribe_at(
     endpoint: &str,
     wav: &Path,
@@ -56,65 +35,48 @@ fn transcribe_at(
     if key.trim().is_empty() {
         return Err("Add a Groq API key in Settings".into());
     }
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let config =
-        std::env::temp_dir().join(format!("flow-curl-{}-{nonce}.conf", std::process::id()));
-    let content = format!(
-        "url = {}\nheader = {}\nform = {}\nform = {}\nform = {}\nform = {}\nmax-time = {}\nfail-with-body\n",
-        curl_quote(endpoint),
-        curl_quote(&format!("Authorization: Bearer {key}")),
-        curl_quote(&format!("model={model}")),
-        curl_quote(&format!("language={language}")),
-        curl_quote("response_format=json"),
-        curl_quote("temperature=0"),
-        timeout.ceil().max(1.0)
-    );
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&config)
-        .map_err(|e| format!("Could not prepare transcription request: {e}"))?;
-    let _cleanup = PrivateTempFile(config.clone());
-    file.write_all(content.as_bytes())
-        .map_err(|e| format!("Could not prepare transcription request: {e}"))?;
-    drop(file);
-    let result = Command::new("curl")
-        .args(["--silent", "--show-error", "--config"])
-        .arg(&config)
-        .arg("--form")
-        .arg(format!("file=@{};type=audio/wav", wav.display()))
-        .args(["--write-out", "\nFLOW_HTTP_STATUS:%{http_code}"])
-        .output();
-    let output = result.map_err(|_| "Could not start curl; install curl".to_string())?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let (body, http_status) = stdout
-        .rsplit_once("\nFLOW_HTTP_STATUS:")
-        .map(|(body, status)| (body, status.trim().parse::<u16>().unwrap_or(0)))
-        .unwrap_or((&stdout, 0));
-    if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr).to_lowercase();
-        let body_lower = body.to_lowercase();
-        if http_status == 401 || body_lower.contains("invalid_api_key") {
-            return Err("Invalid Groq API key".into());
-        }
-        if http_status == 429 || body_lower.contains("rate_limit") {
-            return Err("Groq rate limit; try again shortly".into());
-        }
-        if error.contains("timed out") || error.contains("timeout") {
-            return Err("Transcription timed out".into());
-        }
-        if error.contains("resolve") || error.contains("connect") {
-            return Err("No internet connection".into());
-        }
-        return Err("Transcription failed; check the Groq settings and connection".into());
+    if !timeout.is_finite() || timeout <= 0.0 {
+        return Err("Invalid transcription timeout".into());
     }
-    let response: Response = serde_json::from_str(body)
-        .map_err(|_| "Groq returned an unreadable response".to_string())?;
-    Ok(response.text.unwrap_or_default().trim().to_string())
+    let audio = fs::read(wav).map_err(|e| format!("Could not read recording: {e}"))?;
+    let part = multipart::Part::bytes(audio)
+        .file_name("recording.wav")
+        .mime_str("audio/wav")
+        .map_err(|e| e.to_string())?;
+    let form = multipart::Form::new()
+        .text("model", model.to_owned())
+        .text("language", language.to_owned())
+        .text("response_format", "json")
+        .text("temperature", "0")
+        .part("file", part);
+    let client = Client::builder()
+        .timeout(Duration::from_secs_f64(timeout))
+        .build()
+        .map_err(|_| "Could not initialize secure transcription connection")?;
+    let response = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .multipart(form)
+        .send()
+        .map_err(|error| {
+            if error.is_timeout() {
+                "Transcription timed out".to_string()
+            } else if error.is_connect() {
+                "Could not connect to Groq".to_string()
+            } else {
+                "Transcription request failed".to_string()
+            }
+        })?;
+    match response.status().as_u16() {
+        401 | 403 => return Err("Invalid Groq API key or model access".into()),
+        429 => return Err("Groq rate limit; try again shortly".into()),
+        200..=299 => {}
+        _ => return Err("Transcription failed; check the Groq settings and connection".into()),
+    }
+    response
+        .json::<Response>()
+        .map(|r| r.text.unwrap_or_default().trim().to_string())
+        .map_err(|_| "Groq returned an unreadable response".into())
 }
 
 #[cfg(test)]

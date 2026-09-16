@@ -5,21 +5,27 @@ Flow is a small X11 desktop dictation app built with Tauri and Rust. Hold **Ctrl
 ## Requirements
 
 - Kali/Debian Linux, X11, and a working PipeWire microphone
-- Rust/Cargo for building from source
-- `pw-record`, `curl`, `xclip`, `xdotool`, `xrandr`, and `sqlite3`
+- Rust/Cargo for building from source (only needed with `--source`)
+- `curl`, `pw-record`, `xclip`, `xdotool`, `xrandr`, and `sqlite3`
 - A Groq API key with access to `whisper-large-v3-turbo`
 
 Wayland is not supported yet. Global shortcuts and paste-back use X11 behavior.
 
 ## Install
 
-Install the system packages and Rust toolchain if they are not already available. On Debian/Kali, the desktop build libraries include GTK/WebKitGTK and AppIndicator development packages. Then run:
+The normal installer downloads the latest Linux AppImage from GitHub Releases, verifies it against the published `SHA256SUMS`, and installs it under `~/.local/opt/flow-linux`, with a stable launcher at `~/.local/bin/flow-linux`:
 
 ```sh
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/piccolojnr/pico-flow/master/install.sh | bash
 ```
 
-The installer builds the Rust app and replaces the old Python launcher at `~/.local/bin/flow-linux`. It removes only the retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
+From a checkout, use `./install.sh --source` to build and install the current code; to pin a release, use `./install.sh --version 0.2.0`. The installer removes only retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
+
+On Debian/Kali, install the runtime tools with:
+
+```sh
+sudo apt install pipewire-bin xclip xdotool x11-xserver-utils sqlite3 curl
+```
 
 Open **Flow Linux** from the application menu or tray. Enter or confirm the Groq API key in Settings. Settings live in `~/.config/flow-linux/config.toml` with private file permissions. An existing TOML file is loaded as-is; if only the older `.env` exists, Flow imports its Groq key, model, and language without deleting it.
 
@@ -50,3 +56,19 @@ The main Rust modules are under `src-tauri/src/`; the local Tauri UI is under `u
 When inserting a transcript, Flow uses Ctrl+V in regular text fields and Shift+Insert in detected terminal windows. The terminal shortcut pastes transcript text without triggering Codex CLI's Ctrl+V image-attachment action.
 
 For a desktop smoke test, launch Flow in an X11 session, open a text editor, hold the shortcut while speaking, and verify the pill appears only during capture and that the transcript is pasted into the editor. Test with a real Groq key to verify the network transcription path. Microphone and Groq live checks require a desktop session, microphone, internet access, and API credentials.
+
+### Desktop UI
+
+Open the workspace directly with:
+
+```sh
+cargo run --manifest-path src-tauri/Cargo.toml -- --settings
+```
+
+The UI lives in `ui/index.html`, `ui/styles.css`, and `ui/app.js`; the recording pill is `ui/overlay.html`. Fonts are bundled in `ui/assets/` so the interface makes no CDN requests. See `ui/assets/NOTICE.md` for sources and `DESIGN.md` for the design references. The interface follows the system light/dark theme and reduced-motion preferences.
+
+For a visual-only preview, open `ui/index.html` in a browser. Saving settings requires the running Tauri app; the browser preview identifies itself and disables saving.
+
+### Releases
+
+Releases are built for Linux x86_64 (`.deb` and `.AppImage`) and Windows x86_64 (`.exe`). In GitHub Actions, open **Tagged release → Run workflow**, enter the exact version in `package.json` (for example `0.2.0`), and run it. The workflow validates every version file, creates the matching `v0.2.0` tag, builds both platforms, generates `SHA256SUMS`, and publishes the GitHub Release. A manually pushed matching `v…` tag also starts the same build.

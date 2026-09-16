@@ -1,9 +1,10 @@
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::fs;
 use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::Command,
+    time::Duration,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,90 +17,81 @@ pub struct Entry {
     pub model: String,
     pub insertion_status: String,
 }
-fn quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
-}
 fn database() -> PathBuf {
     crate::config::data_dir().join("history.db")
 }
-fn run_at(path: &Path, sql: &str) -> Result<String, String> {
-    let parent = path.parent().unwrap();
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).ok();
-    let result = Command::new("sqlite3")
-        .args(["-json"])
-        .arg(&path)
-        .arg(sql)
-        .output()
-        .map_err(|_| "Local history requires sqlite3".to_string())?;
-    if !result.status.success() {
-        return Err(format!(
-            "History database error: {}",
-            String::from_utf8_lossy(&result.stderr).trim()
-        ));
-    }
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).ok();
-    Ok(String::from_utf8_lossy(&result.stdout).trim().to_string())
-}
-fn initialize_at(path: &Path) -> Result<(), String> {
-    run_at(path, "PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS dictations (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, transcript TEXT NOT NULL, duration REAL NOT NULL CHECK(duration >= 0), provider TEXT NOT NULL, model TEXT NOT NULL, insertion_status TEXT NOT NULL CHECK(insertion_status IN ('pending','inserted','failed'))); CREATE INDEX IF NOT EXISTS dictations_created_at ON dictations(created_at DESC,id DESC);")?;
-    Ok(())
+fn connect(path: &Path) -> Result<Connection, String> {
+    crate::storage::secure_directory(path.parent().ok_or("Invalid history path")?)?;
+    let connection = Connection::open(path).map_err(|e| e.to_string())?;
+    crate::storage::secure_file(path)?;
+    connection
+        .busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    connection.execute_batch("CREATE TABLE IF NOT EXISTS dictations (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, transcript TEXT NOT NULL, duration REAL NOT NULL CHECK(duration >= 0), provider TEXT NOT NULL, model TEXT NOT NULL, insertion_status TEXT NOT NULL CHECK(insertion_status IN ('pending','inserted','failed'))); CREATE INDEX IF NOT EXISTS dictations_created_at ON dictations(created_at DESC,id DESC);").map_err(|e| e.to_string())?;
+    Ok(connection)
 }
 pub fn add(text: &str, duration: f64, model: &str) -> Result<i64, String> {
     add_at(&database(), text, duration, model)
 }
 fn add_at(path: &Path, text: &str, duration: f64, model: &str) -> Result<i64, String> {
-    initialize_at(path)?;
-    let sql = format!("INSERT INTO dictations(created_at,transcript,duration,provider,model,insertion_status) VALUES(strftime('%Y-%m-%dT%H:%M:%fZ','now'),{},{},'Groq',{},'pending'); DELETE FROM dictations WHERE id NOT IN (SELECT id FROM dictations ORDER BY created_at DESC,id DESC LIMIT 500); SELECT last_insert_rowid() AS id;", quote(text), duration.max(0.0), quote(model));
-    #[derive(Deserialize)]
-    struct Id {
-        id: i64,
-    }
-    let rows: Vec<Id> = serde_json::from_str(&run_at(path, &sql)?)
-        .map_err(|_| "Could not save local history".to_string())?;
-    rows.first()
-        .map(|row| row.id)
-        .ok_or_else(|| "Could not save local history".to_string())
+    let mut connection = connect(path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    transaction.execute("INSERT INTO dictations(created_at,transcript,duration,provider,model,insertion_status) VALUES(strftime('%Y-%m-%dT%H:%M:%fZ','now'),?1,?2,'Groq',?3,'pending')", params![text,duration.max(0.0),model]).map_err(|e| e.to_string())?;
+    let id = transaction.last_insert_rowid();
+    transaction.execute("DELETE FROM dictations WHERE id NOT IN (SELECT id FROM dictations ORDER BY created_at DESC,id DESC LIMIT 500)", []).map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(id)
 }
 pub fn mark(id: i64, status: &str) {
     let _ = mark_at(&database(), id, status);
 }
 fn mark_at(path: &Path, id: i64, status: &str) -> Result<(), String> {
-    run_at(
-        path,
-        &format!(
-            "UPDATE dictations SET insertion_status={} WHERE id={id};",
-            quote(status)
-        ),
-    )?;
+    connect(path)?
+        .execute(
+            "UPDATE dictations SET insertion_status=?1 WHERE id=?2",
+            params![status, id],
+        )
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 pub fn list(search: &str) -> Result<Vec<Entry>, String> {
     list_at(&database(), search)
 }
 fn list_at(path: &Path, search: &str) -> Result<Vec<Entry>, String> {
-    initialize_at(path)?;
-    let sql = format!("SELECT id,created_at,transcript,duration,provider,model,insertion_status FROM dictations WHERE instr(lower(transcript),lower({}))>0 ORDER BY created_at DESC,id DESC LIMIT 500;", quote(search));
-    let output = run_at(path, &sql)?;
-    if output.is_empty() {
-        return Ok(Vec::new());
-    }
-    serde_json::from_str(&output).map_err(|_| "Could not read local history".to_string())
+    let connection = connect(path)?;
+    let mut statement = connection.prepare("SELECT id,created_at,transcript,duration,provider,model,insertion_status FROM dictations WHERE instr(lower(transcript),lower(?1))>0 ORDER BY created_at DESC,id DESC LIMIT 500").map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([search], |row| {
+            Ok(Entry {
+                id: row.get(0)?,
+                created_at: row.get(1)?,
+                transcript: row.get(2)?,
+                duration: row.get(3)?,
+                provider: row.get(4)?,
+                model: row.get(5)?,
+                insertion_status: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 pub fn delete(id: i64) -> Result<(), String> {
     delete_at(&database(), id)
 }
 fn delete_at(path: &Path, id: i64) -> Result<(), String> {
-    initialize_at(path)?;
-    run_at(path, &format!("DELETE FROM dictations WHERE id={id};"))?;
+    connect(path)?
+        .execute("DELETE FROM dictations WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 pub fn clear() -> Result<(), String> {
     clear_at(&database())
 }
 fn clear_at(path: &Path) -> Result<(), String> {
-    initialize_at(path)?;
-    run_at(path, "DELETE FROM dictations;")?;
+    connect(path)?
+        .execute("DELETE FROM dictations", [])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -117,7 +109,7 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir(&folder).unwrap();
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::storage::secure_directory(&folder).unwrap();
         let path = folder.join("history.db");
         let text = "Flow's dictation; DROP TABLE dictations; --";
         let id = add_at(&path, text, 1.25, "whisper-test").unwrap();

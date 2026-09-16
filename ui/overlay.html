@@ -3,23 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <style>
-    html, body { width: 320px; height: 64px; min-width: 320px; min-height: 64px; margin: 0; overflow: hidden; background: transparent; }
-    body { display: grid; place-items: center; font: 14px system-ui, sans-serif; color: #fff; }
-    .pill { display: flex; align-items: center; gap: 11px; width: 292px; height: 50px; padding: 0 17px; border: 1px solid #b05dff; border-radius: 28px; background: rgba(29, 27, 46, .97); box-shadow: 0 8px 30px rgba(0, 0, 0, .35); transition: border-color .16s ease, background .16s ease; }
-    .dot { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: #ff5d7d; box-shadow: 0 0 12px #ff5d7d; }
-    .label { font-size: 13px; font-weight: 650; white-space: nowrap; }
-    .hint { margin-left: auto; color: #c4bfd9; font-size: 10px; white-space: nowrap; }
-    body[data-state="handsfree"] .pill { border-color: #ae79ff; background: rgba(39, 27, 58, .98); }
-    body[data-state="handsfree"] .dot { background: #bd8cff; box-shadow: 0 0 12px #bd8cff; }
-    body[data-state="transcribing"] .pill { border-color: #64b5ff; background: rgba(22, 38, 57, .98); }
-    body[data-state="transcribing"] .dot { background: #76c5ff; box-shadow: 0 0 12px #76c5ff; animation: pulse 1s ease-in-out infinite alternate; }
-    @keyframes pulse { to { opacity: .45; } }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+    @font-face { font-family:Satoshi; src:url('assets/satoshi-500.woff2') format('woff2'); font-weight:500; font-display:swap; }
+    :root { font:13px/1.2 Satoshi,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; color:#f5f8f4; }
+    * { box-sizing:border-box; }
+    html,body { width:320px; height:64px; min-width:320px; min-height:64px; margin:0; overflow:hidden; background:transparent; }
+    body { display:grid; place-items:center; }
+    .pill { position:relative; display:flex; align-items:center; gap:11px; width:294px; height:50px; padding:0 15px; overflow:hidden; border:1px solid #746799; border-radius:16px; background:rgba(30,29,39,.97); box-shadow:0 9px 28px #0007, inset 0 1px #ffffff10; transition:border-color .18s,background .18s; }
+    .status-icon { position:relative; display:grid; place-items:center; width:27px; height:27px; flex:0 0 27px; border-radius:9px; background:#383044; color:#c4b5fd; }
+    .status-icon svg { width:16px; height:16px; }
+    .dot { position:absolute; width:7px; height:7px; right:-2px; bottom:-2px; border:1.5px solid #1e1d27; border-radius:50%; background:#bca6ff; }
+    .copy { min-width:0; }
+    .label { font-weight:680; font-size:12px; white-space:nowrap; }
+    .hint { margin-top:3px; color:#bcb6cd; font-size:9px; white-space:nowrap; }
+    .wave { display:flex; align-items:center; gap:2px; height:20px; margin-left:auto; }
+    .wave i { width:2px; height:6px; border-radius:2px; background:#bca6ff; opacity:.85; }
+    .wave i:nth-child(2),.wave i:nth-child(6) { height:11px; }
+    .wave i:nth-child(3),.wave i:nth-child(5) { height:16px; }
+    .wave i:nth-child(4) { height:9px; }
+    body[data-state="handsfree"] .pill { border-color:#9481ba; background:rgba(36,30,46,.98); }
+    body[data-state="handsfree"] .status-icon { color:#d2bcff; background:#443452; }
+    body[data-state="handsfree"] .dot { background:#bca6ff; }
+    body[data-state="transcribing"] .pill { border-color:#739ab0; background:rgba(28,39,43,.98); }
+    body[data-state="transcribing"] .status-icon { color:#a6d7e9; background:#31474c; }
+    body[data-state="transcribing"] .dot { background:#89d4ed; }
+    body[data-state="transcribing"] .wave i { background:#89d4ed; animation:level .75s ease-in-out infinite alternate; }
+    body[data-state="transcribing"] .wave i:nth-child(2n) { animation-delay:.22s; }
+    body[data-state="transcribing"] .wave i:nth-child(3n) { animation-delay:.39s; }
+    @keyframes level { to { transform:scaleY(.4); opacity:.5; } }
+    @media (prefers-reduced-motion:reduce) { *,*:before,*:after { animation-duration:.01ms!important; transition-duration:.01ms!important; } }
   </style>
 </head>
 <body>
-  <div class="pill" role="status" aria-live="polite" aria-atomic="true"><span class="dot" aria-hidden="true"></span><span id="label" class="label">Listening</span><span id="hint" class="hint">Release to finish</span></div>
+  <div class="pill" role="status" aria-live="polite" aria-atomic="true">
+    <div class="status-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0v-5a3 3 0 0 0-3-3Z" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3m-3 0h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="dot"></span></div>
+    <div class="copy"><div id="label" class="label">Listening</div><div id="hint" class="hint">Release to finish</div></div>
+    <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  </div>
   <script type="module">
     const { listen } = window.__TAURI__.event;
     const label = document.getElementById('label');
@@ -30,7 +51,7 @@
       const normalized = message.toLowerCase();
       const state = normalized.includes('hands-free') ? 'handsfree' : normalized.includes('transcrib') ? 'transcribing' : 'listening';
       document.body.dataset.state = state;
-      hint.textContent = state === 'handsfree' ? 'Ctrl + Super + Space to stop' : state === 'transcribing' ? 'Please wait…' : 'Release to finish';
+      hint.textContent = state === 'handsfree' ? 'Ctrl + Super + Space to stop' : state === 'transcribing' ? 'Finishing your words…' : 'Release to finish';
     }
     await listen('flow-status', ({ payload }) => update(payload));
   </script>

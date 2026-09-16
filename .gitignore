@@ -14,3 +14,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Build tooling
+/node_modules/
+/release-assets/

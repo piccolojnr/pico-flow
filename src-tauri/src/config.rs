@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::{env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
+#[cfg(target_os = "linux")]
+use std::env;
+use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -87,12 +89,22 @@ impl Default for AppSettings {
 }
 
 pub fn config_path() -> PathBuf {
+    #[cfg(not(target_os = "linux"))]
+    return dirs::config_dir()
+        .expect("User configuration directory unavailable")
+        .join("flow-linux/config.toml");
+    #[cfg(target_os = "linux")]
     env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config"))
         .join("flow-linux/config.toml")
 }
 pub fn data_dir() -> PathBuf {
+    #[cfg(not(target_os = "linux"))]
+    return dirs::data_local_dir()
+        .expect("User data directory unavailable")
+        .join("flow-linux");
+    #[cfg(target_os = "linux")]
     env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -137,24 +149,26 @@ pub fn save(config: &Config) -> Result<(), String> {
     validate(config)?;
     let path = config_path();
     let parent = path.parent().ok_or("Invalid config location")?;
-    fs::create_dir_all(parent).map_err(|e| format!("Could not create settings directory: {e}"))?;
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).ok();
+    crate::storage::secure_directory(parent)?;
     let body = toml::to_string_pretty(config).map_err(|e| e.to_string())?;
-    let temporary = path.with_extension("toml.tmp");
-    fs::write(&temporary, body).map_err(|e| format!("Could not write settings: {e}"))?;
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    use std::io::Write;
+    temporary
+        .write_all(body.as_bytes())
         .map_err(|e| e.to_string())?;
-    fs::rename(&temporary, &path).map_err(|e| format!("Could not save settings: {e}"))?;
+    temporary.as_file().sync_all().map_err(|e| e.to_string())?;
+    temporary
+        .persist(&path)
+        .map_err(|e| format!("Could not save settings: {e}"))?;
     secure_config(&path)
 }
-
-fn secure_config(path: &PathBuf) -> Result<(), String> {
+fn secure_config(path: &std::path::Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).ok();
+        crate::storage::secure_directory(parent)?;
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .map_err(|e| format!("Could not protect settings file: {e}"))
+    crate::storage::secure_file(path)
 }
+
 fn validate(c: &Config) -> Result<(), String> {
     if c.transcription.model.trim().is_empty() || c.transcription.language.trim().is_empty() {
         return Err("Model and language cannot be empty".into());

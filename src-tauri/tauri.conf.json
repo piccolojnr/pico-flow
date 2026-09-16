@@ -1,15 +1,65 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Flow Linux",
+  "productName": "Flow",
   "version": "0.2.0",
   "identifier": "dev.flowlinux.app",
-  "build": { "frontendDist": "../ui" },
+  "build": {
+    "frontendDist": "../ui"
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      { "label": "main", "title": "Flow Linux", "url": "index.html", "width": 680, "height": 620, "visible": false, "center": true, "resizable": true }
+      {
+        "label": "main",
+        "title": "Flow",
+        "url": "index.html",
+        "width": 920,
+        "height": 780,
+        "minWidth": 760,
+        "minHeight": 660,
+        "visible": false,
+        "center": true,
+        "resizable": true
+      }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": true
   },
-  "bundle": { "active": false }
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Private desktop voice dictation",
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "pipewire-bin",
+          "xclip",
+          "xdotool",
+          "x11-xserver-utils"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "pipewire-utils",
+          "xclip",
+          "xdotool",
+          "xrandr"
+        ]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "infoPlist": "Info.plist",
+      "entitlements": "Entitlements.plist",
+      "signingIdentity": "-"
+    }
+  }
 }

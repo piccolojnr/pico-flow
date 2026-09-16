@@ -1,16 +1,27 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 mod audio;
+#[cfg(target_os = "linux")]
+mod clipboard;
+#[cfg(not(target_os = "linux"))]
+#[path = "clipboard_native.rs"]
 mod clipboard;
 mod config;
 mod history;
+#[cfg(target_os = "linux")]
 mod instance;
+mod storage;
 mod transcription;
 
 use audio::{Capture, Recorder};
 use config::Config;
 use rdev::{listen, EventType};
-use std::{
-    collections::HashSet, fs, path::PathBuf, process::Command, sync::Mutex, thread, time::Duration,
-};
+use std::{collections::HashSet, fs, sync::Mutex, thread, time::Duration};
+#[cfg(target_os = "linux")]
+use std::{path::PathBuf, process::Command};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -52,7 +63,7 @@ fn save_config(
     if let Ok(mut current) = state.config.lock() {
         *current = config.clone();
     }
-    set_autostart(config.app.autostart)?;
+    set_autostart(&app, config.app.autostart)?;
     let _ = app.emit("config-saved", ());
     Ok(())
 }
@@ -69,7 +80,8 @@ fn history_clear() -> Result<(), String> {
     history::clear()
 }
 
-fn set_autostart(enabled: bool) -> Result<(), String> {
+#[cfg(target_os = "linux")]
+fn set_autostart(_app: &AppHandle, enabled: bool) -> Result<(), String> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -100,6 +112,18 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
     fs::write(&path, format!("[Desktop Entry]\nType=Application\nName=Flow Linux\nExec=\"{escaped}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n" )).map_err(|e| format!("Could not update login startup: {e}"))
 }
 
+#[cfg(not(target_os = "linux"))]
+fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|e| format!("Could not update login startup: {e}"))
+}
+
 fn status(app: &AppHandle, message: &str, active: bool) {
     if let Some(state) = app.try_state::<State>() {
         if let Ok(mut last) = state.status.lock() {
@@ -114,6 +138,7 @@ fn status(app: &AppHandle, message: &str, active: bool) {
         set_overlay(app, false, None);
     }
 }
+#[cfg(any(target_os = "linux", test))]
 fn parse_monitor_geometry(geometry: &str) -> Option<(i32, i32, i32, i32)> {
     let x_separator = geometry.find('x')?;
     let width = geometry[..x_separator].split('/').next()?.parse().ok()?;
@@ -129,6 +154,7 @@ fn parse_monitor_geometry(geometry: &str) -> Option<(i32, i32, i32, i32)> {
         height,
     ))
 }
+#[cfg(target_os = "linux")]
 fn monitor_bounds_for_window(window_id: Option<&str>) -> Option<(i32, i32, i32, i32)> {
     let output = Command::new("xrandr")
         .args(["--listactivemonitors"])
@@ -176,6 +202,11 @@ fn monitor_bounds_for_window(window_id: Option<&str>) -> Option<(i32, i32, i32, 
         .or(monitors.first())
         .map(|(_, bounds)| *bounds)
 }
+#[cfg(not(target_os = "linux"))]
+fn monitor_bounds_for_window(_window_id: Option<&str>) -> Option<(i32, i32, i32, i32)> {
+    None
+}
+
 fn set_overlay(app: &AppHandle, show: bool, target_window: Option<&str>) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         if show {
@@ -443,7 +474,9 @@ fn build_overlay(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 fn main() {
-    let show_window = std::env::args().any(|arg| arg == "--settings" || arg == "--show");
+    let show_window = std::env::args().any(|arg| arg == "--settings" || arg == "--show")
+        || (!cfg!(target_os = "linux") && !std::env::args().any(|arg| arg == "--background"));
+    #[cfg(target_os = "linux")]
     let claim = match instance::claim(show_window) {
         Ok(claim) => claim,
         Err(error) => {
@@ -451,7 +484,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let instance::Claim::Primary { listener, path } = claim else {
+    #[cfg(target_os = "linux")]
+    let instance::Claim::Primary { listener, path } = claim
+    else {
         return;
     };
     let config = config::load().unwrap_or_else(|error| {
@@ -459,7 +494,21 @@ fn main() {
         Config::default()
     });
     let config = config;
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(not(target_os = "linux"))]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.emit("flow-status-refresh", ());
+            }
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ));
+    builder
         .manage(State {
             config: Mutex::new(config),
             recorder: Mutex::new(Recorder::default()),
@@ -484,6 +533,7 @@ fn main() {
         })
         .setup(move |app| {
             build_overlay(app)?;
+            #[cfg(target_os = "linux")]
             instance::serve(app.handle().clone(), listener, path);
             let autostart = app
                 .state::<State>()
@@ -491,7 +541,7 @@ fn main() {
                 .lock()
                 .map(|config| config.app.autostart)
                 .unwrap_or(false);
-            if let Err(error) = set_autostart(autostart) {
+            if let Err(error) = set_autostart(app.handle(), autostart) {
                 eprintln!("[Flow] Could not update login startup: {error}");
             }
             let open = MenuItem::with_id(app, "open", "Open Flow", true, None::<&str>)?;

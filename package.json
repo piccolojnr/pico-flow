@@ -1,0 +1,11 @@
+{
+  "name": "pico-flow",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "check:ui": "node scripts/check-ui.mjs",
+    "test:release": "node --test scripts/release.test.mjs"
+  },
+  "devDependencies": { "@tauri-apps/cli": "2.11.4" }
+}
