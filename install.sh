@@ -60,6 +60,10 @@ else
   sums_url="$(printf '%s\n' "${metadata}" | sed -nE 's/.*"browser_download_url": "([^"]*SHA256SUMS)".*/\1/p' | head -n 1)"
   [[ -n "${sums_url}" ]] || { echo "No SHA256SUMS file was found in ${RELEASE_URL}." >&2; exit 1; }
   tmp="$(mktemp "${TMPDIR:-/tmp}/flow-linux.XXXXXX")"
+  if [[ "${INSTALL_FORMAT}" == "deb" ]]; then
+    mv "${tmp}" "${tmp}.deb"
+    tmp="${tmp}.deb"
+  fi
   sums_tmp="$(mktemp "${TMPDIR:-/tmp}/flow-linux-sums.XXXXXX")"
   trap 'rm -f "${tmp}" "${sums_tmp}"' EXIT
   curl --fail --silent --show-error --location "${asset_url}" -o "${tmp}"
