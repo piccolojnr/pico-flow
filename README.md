@@ -19,7 +19,7 @@ The normal installer downloads the latest Linux Debian package from GitHub Relea
 curl -fsSL https://raw.githubusercontent.com/piccolojnr/pico-flow/master/install.sh | bash
 ```
 
-From a checkout, use `./install.sh --source` to build and install the current code; to pin a release, use `./install.sh --version 0.2.0`. Use `./install.sh --appimage` only when you specifically want the portable bundle. The installer removes only retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
+From a checkout, use `./install.sh --source` to build and install the current code; to pin a release, use `./install.sh --version 0.2.1`. Use `./install.sh --appimage` only when you specifically want the portable bundle. The installer removes only retired Python runtime files under `~/.local/share/flow-linux`; your configuration, Groq key, and `history.db` remain in place.
 
 On Debian/Kali, install the runtime tools with:
 
@@ -71,4 +71,4 @@ For a visual-only preview, open `ui/index.html` in a browser. Saving settings re
 
 ### Releases
 
-Releases are built for Linux x86_64 (`.deb` and `.AppImage`) and Windows x86_64 (`.exe`). In GitHub Actions, open **Tagged release → Run workflow**, enter the exact version in `package.json` (for example `0.2.0`), and run it. The workflow validates every version file, creates the matching `v0.2.0` tag, builds both platforms, generates `SHA256SUMS`, and publishes the GitHub Release. A manually pushed matching `v…` tag also starts the same build.
+Releases are built for Linux x86_64 (`.deb` and `.AppImage`) and Windows x86_64 (`.exe`). In GitHub Actions, open **Tagged release → Run workflow**, enter the exact version in `package.json` (for example `0.2.1`), and run it. The workflow validates every version file, creates the matching `v0.2.1` tag, builds both platforms, generates `SHA256SUMS`, and publishes the GitHub Release. A manually pushed matching `v…` tag also starts the same build.
